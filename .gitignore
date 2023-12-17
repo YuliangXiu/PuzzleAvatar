@@ -16,7 +16,7 @@ cores/lib/freqencoder/build
 cores/lib/gridencoder/build
 cores/lib/freqencoder/dist
 cores/lib/gridencoder/dist
-thirdparties/GroundingDINO
-thirdparties/MODNet
-thirdparties/nvdiffrast
+thirdparties/GroundingDINO/
+thirdparties/MODNet/
+thirdparties/nvdiffrast/
 examples/multi_concepts/*

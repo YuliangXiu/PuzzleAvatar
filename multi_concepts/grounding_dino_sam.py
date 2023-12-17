@@ -148,12 +148,12 @@ if __name__ == '__main__':
     sam = sam_model_registry[SAM_ENCODER_VERSION](checkpoint=SAM_CHECKPOINT_PATH).to(device=DEVICE)
     sam_predictor = SamPredictor(sam)
 
-    BOX_TRESHOLD = 0.50
-    TEXT_TRESHOLD = 0.50
+    BOX_TRESHOLD = 0.30
+    TEXT_TRESHOLD = 0.25
 
     json_path = f"{opt.out_dir}/gpt4v_response.json"
     if not os.path.exists(json_path):
-        gpt4v_response = gpt4v_captioning(opt.in_dir)
+        gpt4v_response = gpt4v_captioning(os.path.join(opt.in_dir, "image"))
         with open(json_path, "w") as f:
             f.write(gpt4v_response)
     else:
@@ -172,8 +172,8 @@ if __name__ == '__main__':
         img_path = os.path.join(opt.in_dir, "image", img_name)
 
         image = cv2.imread(img_path)
-        if image.shape[:2] != (512, 512):
-            image = resizeAndPad(image, (512, 512))
+        if image.shape[:2] != (4096, 4096):
+            image = resizeAndPad(image, (4096, 4096))
             cv2.imwrite(img_path, image)
 
         # detect objects
@@ -200,7 +200,20 @@ if __name__ == '__main__':
                 if np.logical_and(mask, person_mask).sum() / person_mask.sum() < 0.9:
                     mask_dict[cls_id] = mask_dict.get(cls_id, []) + [mask]
 
+        mask_final = {}
         for cls_id, masks in mask_dict.items():
             mask = np.stack(masks).sum(axis=0)
             mask = (mask > 0).astype(np.uint8) * 255
-            cv2.imwrite(f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png", mask)
+            mask_final[cls_id] = mask
+
+        for cls_id, mask in mask_final.items():
+            mask_other = np.zeros_like(mask)
+            other_cls_ids = list(mask_final.keys())
+            other_cls_ids.remove(cls_id)
+            for other_cls_id in other_cls_ids:
+                mask_other += mask_final[other_cls_id]
+            mask_final[cls_id] = mask * (mask_other == 0)
+            cv2.imwrite(
+                f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
+                mask_final[cls_id].astype(np.uint8)
+            )

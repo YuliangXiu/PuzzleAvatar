@@ -38,18 +38,17 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)
 # # [Optional] you can delete the original ldm exp dir to save disk memory
 # rm -rf ${EXP_DIR}/ldm
 
-# # Step 4: Run geometry stage (Run on a single GPU)
-# python cores/main.py --config configs/tech_geometry.yaml --exp_dir $EXP_DIR --sub_name $SUBJECT_NAME
-# python utils/body_utils/postprocess.py --dir $EXP_DIR/obj --name $SUBJECT_NAME
-
+# Step 4: Run geometry stage (Run on a single GPU)
 # python cores/main_mc.py \
 #  --config configs/tech_mc_geometry.yaml \
 #  --exp_dir ${EXP_DIR} \
 #  --sub_name ${SUBJECT_NAME}
 
-# # Step 5: Run texture stage (Run on a single GPU)
-# python cores/main.py --config configs/tech_texture.yaml --exp_dir $EXP_DIR --sub_name $SUBJECT_NAME
+# python utils/body_utils/postprocess.py \
+#     --dir ${EXP_DIR}/obj \
+#     --name ${SUBJECT_NAME}
 
+# Step 5: Run texture stage (Run on a single GPU)
 python cores/main_mc.py \
  --config configs/tech_mc_texture.yaml \
  --exp_dir ${EXP_DIR} \

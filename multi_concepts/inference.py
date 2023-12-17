@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import random
+import numpy as np
 
 import torch
 from diffusers import DDIMScheduler, DiffusionPipeline
@@ -54,17 +55,13 @@ class BreakASceneInference:
         self.pipeline.to(self.args.device)
 
     @torch.no_grad()
-    def infer_and_save(self, prompts):
+    def infer_and_save(self, prompts, tokens):
         images = self.pipeline(prompts).images
         if not os.path.exists(self.args.output_dir):
             os.makedirs(self.args.output_dir, exist_ok=True)
         for idx in range(len(images)):
             print(prompts[idx])
-            prompt_as_title = prompts[idx].replace("<asset",
-                                                   "").replace(">",
-                                                               "").replace(",",
-                                                                           " ").replace(" ", "_")
-            images[idx].save(os.path.join(self.args.output_dir, f"{idx:02d}_{prompt_as_title}.png"))
+            images[idx].save(os.path.join(self.args.output_dir, f"img{idx:02d}_{tokens[idx]}.png"))
 
 
 if __name__ == "__main__":
@@ -78,15 +75,33 @@ if __name__ == "__main__":
     classes = list(gpt4v_response.keys())
     classes.remove("gender")
     placeholders = [f"<asset{i}>" for i in range(len(classes))]
-    prompt_words = [f"{placeholders[i]} {classes[i]}" for i in range(len(classes))]
+    prompt_words = [
+        f"{placeholders[i]} {gpt4v_response[classes[i]]} {classes[i]}" for i in range(len(classes))
+    ]
 
     prompts = []
+    tokens = []
+    with_ids = [classes.index(cls) for cls in ['face', 'haircut']]
 
     for i in range(break_a_scene_inference.args.num_samples):
-        num_of_tokens = random.randrange(1, len(prompt_words) + 1)
-        tokens_ids_to_use = sorted(random.sample(range(len(prompt_words)), k=num_of_tokens))
-        prompt_head = f"a photo of asian {gender}, walking on the beach, wearing"
-        prompt_garments = ",".join([prompt_words[i] for i in tokens_ids_to_use])
-        prompts.append(f"{prompt_head} {prompt_garments}")
+        num_of_tokens = random.randrange(1, len(classes) + 1)
+        tokens_ids_to_use = sorted(random.sample(range(len(classes)), k=num_of_tokens))
+        prompt_head = f"a high-resolution DSLR image of {gender}, walking on the beach, "
+        tokens.append("_".join([f"{id}_{classes[id]}" for id in tokens_ids_to_use]))
 
-    break_a_scene_inference.infer_and_save(prompts=prompts)
+        if not np.isin(with_ids, tokens_ids_to_use).any():
+            prompt_garments = "wearing " + " and ".join([
+                prompt_words[i] for i in tokens_ids_to_use
+            ]) + "."
+        else:
+            for with_id in with_ids:
+                if with_id in tokens_ids_to_use:
+                    prompt_head += f"with {prompt_words[with_id]}, "
+            prompt_garments = "wearing " + " and ".join([
+                prompt_words[id] for id in tokens_ids_to_use if id not in with_ids
+            ]) + "."
+            prompt_garments = prompt_garments.replace(", wearing .", ".")
+
+        prompts.append(f"{prompt_head}{prompt_garments}")
+
+    break_a_scene_inference.infer_and_save(prompts=prompts, tokens=tokens)

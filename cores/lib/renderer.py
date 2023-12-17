@@ -166,6 +166,7 @@ class Renderer(nn.Module):
 
         if cfg.model.use_vertex_tex:
             self.vertex_albedo = nn.Parameter(self.mesh.v_color)
+            
         # extract trainable parameters
         if self.dmtet_network is None and not cfg.train.lock_geo:
             self.sdf = nn.Parameter(torch.zeros_like(self.mesh.v[..., 0]))

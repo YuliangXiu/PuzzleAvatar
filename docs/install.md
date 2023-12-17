@@ -22,6 +22,8 @@ IGNORE_TORCH_VER=1 pip install git+https://github.com/NVIDIAGameWorks/kaolin.git
 3. Build modules
 
 ```bash
+git clone --recurse-submodules git@github.com:YuliangXiu/PuzzleAvatar.git
+
 cd cores/lib/freqencoder
 python setup.py install
 

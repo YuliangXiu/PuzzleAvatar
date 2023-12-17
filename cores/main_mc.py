@@ -28,14 +28,21 @@ def dict_to_prompt(d):
     prompt = "a high-resolution DSLR image of"
     keys = list(d.keys())
     gender = "man" if d['gender'] == "male" else "woman"
-    prompt += f" a {gender} wearing"
     keys.remove("gender")
 
-    for idx, k in enumerate(keys):
-        if idx < len(keys) - 1:
-            prompt += f" a <asset{idx}> {d[k]} {k},"
-        else:
-            prompt += f" a <asset{idx}> {d[k]} {k}."
+    prompt += f" a {gender}, "
+    with_classes = ['face', 'haircut']
+    
+    # with {face} and {haircut}
+    for key in with_classes:
+        if key in keys:
+            idx = keys.index(key)
+            prompt += f"with <asset{idx}> {d[key]} {key}, "
+
+    prompt += "wearing " + " and ".join([
+        f"<asset{keys.index(key)}> {d[key]} {key}" for key in keys if key not in with_classes
+    ]) + "."
+
     return d['gender'], prompt
 
 
@@ -75,7 +82,7 @@ if __name__ == '__main__':
     keypoint_path = os.path.join(opt.exp_dir.replace("results", "examples"), f"smplx_{gender}.npy")
     cfg.data.last_model = smplx_path
     cfg.data.keypoints_path = keypoint_path
-    
+
     if cfg.data.load_result_mesh:
         cfg.data.last_model = os.path.join(opt.exp_dir, 'obj', "subject_geometry.obj")
 
@@ -105,7 +112,7 @@ if __name__ == '__main__':
 
         smplx_verts = smplx_obj.vertices.detach()[0].numpy()
         smplx_joints = smplx_obj.joints.detach()[0].numpy()
-        pelvis_y = smplx_joints[0, 1]
+        pelvis_y = 0.5 * (smplx_verts[:, 1].min() + smplx_verts[:, 1].max())
         smplx_verts[:, 1] -= pelvis_y
         smplx_joints[:, 1] -= pelvis_y
         smplx_faces = smplx_model.faces
