@@ -29,18 +29,19 @@ def dict_to_prompt(d):
     keys = list(d.keys())
     gender = "man" if d['gender'] == "male" else "woman"
     keys.remove("gender")
+    keys.remove("eyeglasses")
 
     prompt += f" a {gender}, "
     with_classes = ['face', 'haircut']
-    
+
     # with {face} and {haircut}
     for key in with_classes:
         if key in keys:
             idx = keys.index(key)
-            prompt += f"with <asset{idx}> {d[key]} {key}, "
+            prompt += f"<asset{idx}> {key}, "
 
     prompt += "wearing " + " and ".join([
-        f"<asset{keys.index(key)}> {d[key]} {key}" for key in keys if key not in with_classes
+        f"<asset{keys.index(key)}> {key}" for key in keys if key not in with_classes
     ]) + "."
 
     return d['gender'], prompt

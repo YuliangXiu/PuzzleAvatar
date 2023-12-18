@@ -9,7 +9,6 @@ logs
 *.pyx
 *.egg-info
 *.pt
-*.sub
 *.txt
 OPENAI_API_KEY
 cores/lib/freqencoder/build

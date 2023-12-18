@@ -74,10 +74,10 @@ if __name__ == "__main__":
     gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
     classes = list(gpt4v_response.keys())
     classes.remove("gender")
+    classes.remove("eyeglasses")
+    
     placeholders = [f"<asset{i}>" for i in range(len(classes))]
-    prompt_words = [
-        f"{placeholders[i]} {gpt4v_response[classes[i]]} {classes[i]}" for i in range(len(classes))
-    ]
+    prompt_words = [f"{placeholders[i]} {classes[i]}" for i in range(len(classes))]
 
     prompts = []
     tokens = []
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     for i in range(break_a_scene_inference.args.num_samples):
         num_of_tokens = random.randrange(1, len(classes) + 1)
         tokens_ids_to_use = sorted(random.sample(range(len(classes)), k=num_of_tokens))
-        prompt_head = f"a high-resolution DSLR image of {gender}, walking on the beach, "
+        prompt_head = f"a high-resolution DSLR image of {gender}, "
         tokens.append("_".join([f"{id}_{classes[id]}" for id in tokens_ids_to_use]))
 
         if not np.isin(with_ids, tokens_ids_to_use).any():
@@ -96,12 +96,11 @@ if __name__ == "__main__":
         else:
             for with_id in with_ids:
                 if with_id in tokens_ids_to_use:
-                    prompt_head += f"with {prompt_words[with_id]}, "
+                    prompt_head += f"{prompt_words[with_id]}, "
             prompt_garments = "wearing " + " and ".join([
                 prompt_words[id] for id in tokens_ids_to_use if id not in with_ids
             ]) + "."
-            prompt_garments = prompt_garments.replace(", wearing .", ".")
-
-        prompts.append(f"{prompt_head}{prompt_garments}")
+        
+        prompts.append(f"{prompt_head}{prompt_garments}".replace(", wearing .", "."))
 
     break_a_scene_inference.infer_and_save(prompts=prompts, tokens=tokens)

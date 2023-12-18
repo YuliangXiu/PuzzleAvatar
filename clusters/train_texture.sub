@@ -1,0 +1,14 @@
+executable = ./scripts/train_texture.sh
+arguments = results/$(dir) $(subject)
+
+error = ./logs/$(subject)/train_texture.err
+output = ./logs/$(subject)/train_texture.out
+log = ./logs/$(subject)/train_texture.log
+
+request_memory = 20000
+request_disk = 5G
+request_cpus = 8
+request_gpus = 1
+requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDADeviceName == "NVIDIA A100-SXM4-80GB")
+
+queue dir,subject from ./clusters/subjects.txt

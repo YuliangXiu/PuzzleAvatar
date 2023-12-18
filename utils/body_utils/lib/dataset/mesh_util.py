@@ -380,18 +380,16 @@ def mesh_edge_loss(meshes, target_length: float = 0.0):
     return loss_all
 
 
-def remesh_laplacian(mesh, obj_path, face_count=50000):
+def remesh_laplacian(mesh, face_count=50000):
 
     mesh = mesh.simplify_quadratic_decimation(face_count)
     mesh = trimesh.smoothing.filter_humphrey(
         mesh, alpha=0.1, beta=0.5, iterations=10, laplacian_operator=None
     )
-    mesh.export(obj_path)
-
     return mesh
 
 
-def poisson(mesh, obj_path, depth=10, face_count=50000):
+def poisson(mesh, obj_path, depth=10):
 
     pcd_path = obj_path[:-4] + "_soups.ply"
     assert (mesh.vertex_normals.shape[1] == 3)
@@ -405,8 +403,6 @@ def poisson(mesh, obj_path, depth=10, face_count=50000):
     largest_mesh = keep_largest(trimesh.Trimesh(np.array(mesh.vertices), np.array(mesh.triangles)))
     largest_mesh.export(obj_path)
 
-    # mesh decimation for faster rendering
-    #low_res_mesh = largest_mesh.simplify_quadratic_decimation(face_count)
     return largest_mesh
 
 
@@ -867,14 +863,33 @@ def barycentric_coordinates_of_projection(points, vertices):
     return weights
 
 
-def query_barycentric_weights(points, vertices, faces):
+def array_to_tensor(arr, device):
+    output_tensor = None
+    if torch.is_tensor(arr):
+        output_tensor = arr
+    else:
+        output_tensor = torch.from_numpy(arr)
+    if len(output_tensor.shape) == 2:
+        output_tensor = output_tensor.unsqueeze(0)
+    return output_tensor.to(device)
+
+
+def query_barycentric_weights(points, vertices, faces, device):
+
+    points = array_to_tensor(points, device).float()
+    vertices = array_to_tensor(vertices, device).float()
+    faces = array_to_tensor(faces, device).long()
+
     chunk_size = 10000
     n_points = points.shape[1]
     print('n_points', n_points)
+    
     pts_ind_all = []
     bary_weights_all = []
     triangles = face_vertices(vertices, faces)
+    
     for i in range(0, n_points, chunk_size):
+        
         p_chunk = points[:, i:i + chunk_size]
         residues, pts_ind, _ = point_to_mesh_distance(p_chunk.cuda(), triangles.cuda())
         pts_ind = pts_ind.cpu()
@@ -882,14 +897,16 @@ def query_barycentric_weights(points, vertices, faces):
             triangles.cpu(), 1, pts_ind[:, :, None, None].expand(-1, -1, 3, 3)
         ).view(-1, 3, 3).cuda()
         bary_weights = barycentric_coordinates_of_projection(p_chunk.view(-1, 3), closest_triangles)
+        
         pts_ind_all.append(pts_ind)
         bary_weights_all.append(bary_weights)
-    pts_ind_all = torch.cat(pts_ind_all, dim=1)
-    bary_weights_all = torch.cat(bary_weights_all, dim=0)
-    #print(pts_ind_all.shape, bary_weights_all.shape)
-    return bary_weights_all.reshape(points.shape).cpu().numpy(), pts_ind_all.cpu().numpy().astype(
-        np.int32
-    )
+        
+    pts_ind_all = torch.cat(pts_ind_all, dim=1).long().to(device)
+    bary_weights_all = torch.cat(bary_weights_all, dim=0).unsqueeze(0).float().to(device)
+    
+    print(pts_ind_all.shape, bary_weights_all.shape)
+    
+    return bary_weights_all, pts_ind_all
 
 
 def update_vertices(mesh, mask, inverse=None):

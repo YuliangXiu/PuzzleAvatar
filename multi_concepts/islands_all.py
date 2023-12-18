@@ -49,6 +49,8 @@ for cls in classes:
                     positions[idx][0]:positions[idx][0]+sizes[idx][0]] = \
                         (images[idx]* (mask[:,:,0:1]>0))[corners[idx][1]:corners[idx][1]+sizes[idx][1],
                                 corners[idx][0]:corners[idx][0]+sizes[idx][0]]
-        cv2.imwrite(
-            f"examples/multi_concepts/human/yuliang/packed/{cls}.png", carvas_img[:, :, [0, 1, 2]]
-        )
+                        
+        output_path = f"examples/multi_concepts/human/yuliang/packed/{cls}.png"
+        if not os.path.exists(os.path.dirname(output_path)):
+            os.makedirs(os.path.dirname(output_path))
+        cv2.imwrite(output_path, carvas_img[:, :, [0, 1, 2]])

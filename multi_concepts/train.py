@@ -435,7 +435,9 @@ def parse_args(input_args=None):
         gpt4v_response = json.load(f)
     args.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
     gpt4v_classes = list(gpt4v_response.keys())
+    
     gpt4v_classes.remove("gender")
+    gpt4v_classes.remove("eyeglasses")
 
     args.num_of_assets = len(gpt4v_classes)
     args.initializer_tokens = gpt4v_classes
@@ -459,7 +461,7 @@ def parse_args(input_args=None):
         if args.class_prompt is not None:
             warnings.warn("You need not use --class_prompt without --with_prior_preservation.")
 
-    return args, gpt4v_response
+    return args
 
 
 class DreamBoothDataset(Dataset):
@@ -473,7 +475,6 @@ class DreamBoothDataset(Dataset):
         placeholder_tokens,
         tokenizer,
         initializer_tokens,
-        gpt4v_response,
         num_class_images,
         gender,
         class_data_root=None,
@@ -486,7 +487,6 @@ class DreamBoothDataset(Dataset):
         self.tokenizer = tokenizer
         self.flip_p = flip_p
         self.gender = gender
-        self.gpt4v_response = gpt4v_response
 
         self.image_transforms = transforms.Compose([
             transforms.Resize((self.size, self.size)),
@@ -516,14 +516,12 @@ class DreamBoothDataset(Dataset):
             self.image_transforms(Image.open(path))[:3] for path in instance_img_paths
         ]
         self.instance_masks = []
-        self.instance_descriptions = []
 
         for i in range(len(instance_img_paths)):
             instance_mask_paths = glob.glob(f"{instance_data_root}/mask/{i:02d}_*.png")
             instance_mask = []
             instance_placeholder_token = []
             instance_class_tokens = []
-            instance_description = []
 
             for instance_mask_path in instance_mask_paths:
                 curr_mask = Image.open(instance_mask_path)
@@ -534,12 +532,10 @@ class DreamBoothDataset(Dataset):
                     self.placeholder_full[self.initializer_tokens.index(curr_token)]
                 )
                 instance_class_tokens.append(curr_token)
-                instance_description.append(self.gpt4v_response[curr_token])
 
             self.instance_masks.append(torch.cat(instance_mask))
             self.placeholder_tokens.append(instance_placeholder_token)
             self.class_tokens.append(instance_class_tokens)
-            self.instance_descriptions.append(instance_description)
 
         self.class_images_path = {}
         if self.class_data_root is not None:
@@ -569,18 +565,14 @@ class DreamBoothDataset(Dataset):
         classes_to_use = [
             self.class_tokens[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
         ]
-        descs_to_use = [
-            self.instance_descriptions[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
-        ]
 
         prompt_head = f"a high-resolution DSLR image of a {self.gender}"
         with_classes = ['face', 'haircut']
 
         if not np.isin(with_classes, classes_to_use).any():
             prompt = f"{prompt_head}, wearing " + " and ".join([
-                f"{placeholder_token} {desc} {class_token}"
-                for (placeholder_token, desc,
-                     class_token) in zip(tokens_to_use, descs_to_use, classes_to_use)
+                f"{placeholder_token} {class_token}"
+                for (placeholder_token, class_token) in zip(tokens_to_use, classes_to_use)
             ]) + "."
         else:
             prompt = f"{prompt_head}, "
@@ -589,18 +581,17 @@ class DreamBoothDataset(Dataset):
             for name in with_classes:
                 if name in classes_to_use:
                     idx = classes_to_use.index(name)
-                    prompt += f"with {tokens_to_use[idx]} {descs_to_use[idx]} {name}, "
+                    prompt += f"{tokens_to_use[idx]} {name}, "
 
             # wearing {garment} and {eyeglasses}
             prompt += "wearing " + " and ".join([
-                f"{placeholder_token} {desc} {class_token}"
-                for (placeholder_token, desc,
-                     class_token) in zip(tokens_to_use, descs_to_use, classes_to_use)
+                f"{placeholder_token} {class_token}"
+                for (placeholder_token, class_token) in zip(tokens_to_use, classes_to_use)
                 if class_token not in with_classes
             ]) + "."
-            prompt = prompt.replace(", wearing .", ".")
-
-        # print(prompt)
+        
+        prompt = prompt.replace(", wearing .", ".")
+        print(prompt)
 
         example["instance_images"] = self.instance_images[index % example_len]
         example["instance_masks"] = self.instance_masks[index % example_len][tokens_ids_to_use]
@@ -628,8 +619,9 @@ class DreamBoothDataset(Dataset):
             if not class_image.mode == "RGB":
                 class_image = class_image.convert("RGB")
             example["class_images"] = self.image_transforms(class_image)
+            with_wear_class = f"wearing {class_token}" if class_token not in with_classes else f"{class_token}"
             example["class_prompt_ids"] = self.tokenizer(
-                f"a high-resolution DSLR image of a {self.gender} wearing {class_token}",
+                f"a high-resolution DSLR image of a {self.gender}, {with_wear_class}.",
                 truncation=True,
                 padding="max_length",
                 max_length=self.tokenizer.model_max_length,
@@ -695,7 +687,7 @@ def get_full_repo_name(
 
 class SpatialDreambooth:
     def __init__(self):
-        self.args, self.gpt4v_response = parse_args()
+        self.args = parse_args()
         self.main()
 
     def main(self):
@@ -759,7 +751,7 @@ class SpatialDreambooth:
 
             for class_name in self.args.initializer_tokens:
 
-                class_prompt = f"a photo of {self.args.gender} wearing {class_name}"
+                class_prompt = f"a high-resolution DSLR image of {self.args.gender}, wearing {class_name}"
                 class_images_dir = Path(self.args.class_data_dir) / class_name
 
                 if not class_images_dir.exists():
@@ -848,7 +840,9 @@ class SpatialDreambooth:
         assert num_added_tokens == self.args.num_of_assets
         self.placeholder_token_ids = self.tokenizer.convert_tokens_to_ids(self.placeholder_tokens)
         self.text_encoder.resize_token_embeddings(len(self.tokenizer))
-        self.args.instance_prompt = "a photo of " + " and ".join(self.placeholder_tokens)
+        self.args.instance_prompt = "a high-resolution DSLR image of " + " and ".join(
+            self.placeholder_tokens
+        )
 
         if len(self.args.initializer_tokens) > 0:
             # Use initializer tokens
@@ -928,7 +922,6 @@ class SpatialDreambooth:
             instance_data_root=self.args.instance_data_dir,
             placeholder_tokens=self.placeholder_tokens,
             initializer_tokens=self.args.initializer_tokens,
-            gpt4v_response=self.gpt4v_response,
             num_class_images=self.args.num_class_images,
             gender=self.args.gender,
             class_data_root=self.args.class_data_dir if self.args.with_prior_preservation else None,

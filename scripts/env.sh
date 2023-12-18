@@ -5,3 +5,6 @@ export HF_HOME="/is/cluster/yxiu/.cache"                            # user-defin
 export CUDA_HOME="/is/software/nvidia/cuda-11.7"                    # user-defined
 export PYTORCH_KERNEL_CACHE_PATH="/is/cluster/yxiu/.cache/torch"    # user-defined
 export PYOPENGL_PLATFORM="egl"
+
+export OPENAI_API_KEY=$(cat OPENAI_API_KEY)
+export PYTHONPATH=$PYTHONPATH:$(pwd)

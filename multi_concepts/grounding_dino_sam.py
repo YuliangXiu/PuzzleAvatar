@@ -16,9 +16,11 @@ import requests
 from groundingdino.util.inference import Model
 from segment_anything import SamPredictor, sam_model_registry
 from tqdm.auto import tqdm
+from scipy import ndimage
 
 
 def enhance_class_name(class_names: List[str]) -> List[str]:
+
     return [f"all {class_name}s" for class_name in class_names]
 
 
@@ -201,19 +203,47 @@ if __name__ == '__main__':
                     mask_dict[cls_id] = mask_dict.get(cls_id, []) + [mask]
 
         mask_final = {}
+
+        # stack all the masks of the same class together within the same image
         for cls_id, masks in mask_dict.items():
             mask = np.stack(masks).sum(axis=0)
             mask = (mask > 0).astype(np.uint8) * 255
             mask_final[cls_id] = mask
 
+        # remove the overlapping area
         for cls_id, mask in mask_final.items():
-            mask_other = np.zeros_like(mask)
-            other_cls_ids = list(mask_final.keys())
-            other_cls_ids.remove(cls_id)
-            for other_cls_id in other_cls_ids:
-                mask_other += mask_final[other_cls_id]
-            mask_final[cls_id] = mask * (mask_other == 0)
-            cv2.imwrite(
-                f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
-                mask_final[cls_id].astype(np.uint8)
-            )
+            if cls_id not in [CLASSES.index("face"), CLASSES.index("eyeglasses")]:
+                mask_other = np.zeros_like(mask)
+                other_cls_ids = list(mask_final.keys())
+                other_cls_ids.remove(cls_id)
+                for other_cls_id in other_cls_ids:
+                    mask_other += mask_final[other_cls_id]
+                mask_final[cls_id] = mask * (mask_other == 0)
+            else:
+                if cls_id == CLASSES.index("face"):
+                    struct = np.ones((3, 3))
+                    mask_final[cls_id] = ndimage.binary_dilation(
+                        np.logical_or(mask, mask_final[CLASSES.index("eyeglasses")]),
+                        structure=struct, iterations=3
+                    ).astype(np.uint8) * 255
+                else:
+                    mask_final[cls_id] = mask
+
+            if cls_id != CLASSES.index("eyeglasses"):
+                cv2.imwrite(
+                    f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
+                    mask_final[cls_id].astype(np.uint8)
+                )
+
+        # # merge face and eyeglasses
+        # for cls_id, mask in mask_final.items():
+        #     if cls_id == CLASSES.index("face"):
+        #         mask_final[cls_id] = ndimage.binary_closing(
+        #             np.logical_or(mask_final[cls_id], mask_final[CLASSES.index("eyeglasses")]),
+        #             structure=np.ones((3, 3))
+        #         ).astype(np.uint8) * 255
+
+        #     cv2.imwrite(
+        #         f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
+        #         mask_final[cls_id].astype(np.uint8)
+        #     )
