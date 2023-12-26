@@ -56,7 +56,7 @@ class BreakASceneInference:
 
     @torch.no_grad()
     def infer_and_save(self, prompts, tokens):
-        images = self.pipeline(prompts).images
+        images = self.pipeline(prompts, guidance_scale=7.5).images
         if not os.path.exists(self.args.output_dir):
             os.makedirs(self.args.output_dir, exist_ok=True)
         for idx in range(len(images)):

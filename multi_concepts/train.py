@@ -19,6 +19,7 @@ import glob
 import hashlib
 import itertools
 import json
+import sys
 import logging
 import math
 import os
@@ -58,9 +59,15 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 
+sys.path.append(os.path.join(os.path.dirname(__file__), "../thirdparties/peft/src"))
+
+from peft import BOFTConfig, get_peft_model
+
 check_min_version("0.12.0")
 
 logger = get_logger(__name__)
+
+UNET_TARGET_MODULES = ["to_q", "to_v", "to_k", "query", "value", "key"]
 
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
@@ -404,6 +411,31 @@ def parse_args(input_args=None):
             " https://pytorch.org/docs/stable/generated/torch.optim.Optimizer.zero_grad.html"
         ),
     )
+    # boft args
+    parser.add_argument(
+        "--use_boft",
+        action="store_true",
+        help="Whether to use BOFT for parameter efficient tuning"
+    )
+    parser.add_argument("--boft_block_num", type=int, default=4, help="The number of BOFT blocks")
+    parser.add_argument("--boft_block_size", type=int, default=0, help="The size of BOFT blocks")
+    parser.add_argument(
+        "--boft_n_butterfly_factor", type=int, default=2, help="The number of butterfly factors"
+    )
+    parser.add_argument("--boft_bias_fit", action="store_true", help="Whether to use bias fit")
+    parser.add_argument(
+        "--boft_dropout",
+        type=float,
+        default=0.1,
+        help="BOFT dropout, only used if use_boft is True"
+    )
+    parser.add_argument(
+        "--boft_bias",
+        type=str,
+        default="none",
+        help="Bias type for BOFT. Can be 'none', 'all' or 'boft_only', only used if use_boft is True"
+    )
+
     parser.add_argument("--lambda_attention", type=float, default=1e-2)
     parser.add_argument("--img_log_steps", type=int, default=200)
     parser.add_argument("--num_of_assets", type=int, default=1)
@@ -435,7 +467,7 @@ def parse_args(input_args=None):
         gpt4v_response = json.load(f)
     args.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
     gpt4v_classes = list(gpt4v_response.keys())
-    
+
     gpt4v_classes.remove("gender")
     gpt4v_classes.remove("eyeglasses")
 
@@ -589,9 +621,9 @@ class DreamBoothDataset(Dataset):
                 for (placeholder_token, class_token) in zip(tokens_to_use, classes_to_use)
                 if class_token not in with_classes
             ]) + "."
-        
+
         prompt = prompt.replace(", wearing .", ".")
-        print(prompt)
+        # print(prompt)
 
         example["instance_images"] = self.instance_images[index % example_len]
         example["instance_masks"] = self.instance_masks[index % example_len][tokens_ids_to_use]
@@ -870,6 +902,7 @@ class SpatialDreambooth:
         # We start by only optimizing the embeddings
         self.vae.requires_grad_(False)
         self.unet.requires_grad_(False)
+
         # Freeze all parameters except for the token embeddings in text encoder
         self.text_encoder.text_model.encoder.requires_grad_(False)
         self.text_encoder.text_model.final_layer_norm.requires_grad_(False)
@@ -1082,16 +1115,38 @@ class SpatialDreambooth:
         self.controller = AttentionStore()
         self.register_attention_control(self.controller)
 
+        # BOFT config
+        if self.args.use_boft:
+            config = BOFTConfig(
+                boft_block_size=self.args.boft_block_size,
+                boft_block_num=self.args.boft_block_num,
+                boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
+                target_modules=UNET_TARGET_MODULES,
+                boft_dropout=self.args.boft_dropout,
+                bias=self.args.boft_bias
+            )
+            self.unet = get_peft_model(self.unet, config)
+            self.unet.to(self.accelerator.device)
+            self.unet.requires_grad_(False)
+
         for epoch in range(first_epoch, self.args.num_train_epochs):
             self.unet.train()
             if self.args.train_text_encoder:
                 self.text_encoder.train()
             for step, batch in enumerate(train_dataloader):
+
                 if self.args.phase1_train_steps == global_step:
-                    self.unet.requires_grad_(True)
+
+                    if self.args.use_boft:
+                        self.unet = get_peft_model(self.unet, config)
+                        self.unet.print_trainable_parameters()
+                    else:
+                        self.unet.requires_grad_(True)
+
                     if self.args.train_text_encoder:
                         self.text_encoder.requires_grad_(True)
-                    unet_params = self.unet.parameters()
+
+                    unet_params = [param for param in self.unet.parameters() if param.requires_grad]
 
                     params_to_optimize = (
                         itertools.chain(unet_params, self.text_encoder.parameters())
@@ -1501,4 +1556,5 @@ class P2PCrossAttnProcessor:
 
 
 if __name__ == "__main__":
+    torch.autograd.set_detect_anomaly(False)
     SpatialDreambooth()

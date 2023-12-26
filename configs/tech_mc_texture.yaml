@@ -41,5 +41,5 @@ data:
     load_occ_mask: False
 guidance:
     use_view_prompt: True
-    guidance_scale: 100.
+    guidance_scale: 7.5
     step_range: [0.02, 0.25]

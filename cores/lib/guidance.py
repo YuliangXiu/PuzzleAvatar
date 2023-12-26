@@ -160,18 +160,23 @@ class StableDiffusion(nn.Module):
             text_embeddings = text_encoder(text_input.input_ids.to(self.device))[0]
 
         # Do the same for unconditional embeddings
-        uncond_input = tokenizer(
+        negative_input = tokenizer(
             negative_prompt,
             padding='max_length',
             max_length=tokenizer.model_max_length,
             return_tensors='pt'
         )
 
+        uncond_input = tokenizer(
+            "", padding='max_length', max_length=tokenizer.model_max_length, return_tensors='pt'
+        )
+
         with torch.no_grad():
             uncond_embeddings = text_encoder(uncond_input.input_ids.to(self.device))[0]
+            negative_embeddings = text_encoder(negative_input.input_ids.to(self.device))[0]
 
         # Cat for final embeddings
-        text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
+        text_embeddings = torch.cat([negative_embeddings, text_embeddings, uncond_embeddings])
         return text_embeddings
 
     def train_step(
@@ -217,7 +222,7 @@ class StableDiffusion(nn.Module):
             noise = torch.randn_like(latents)
             latents_noisy = self.scheduler.add_noise(latents, noise, t)
             # pred noise
-            latent_model_input = torch.cat([latents_noisy] * 2)
+            latent_model_input = torch.cat([latents_noisy] * 3)
             if controlnet_hint is not None:
                 down_block_res_samples, mid_block_res_sample = self.controlnet(
                     latent_model_input,
@@ -241,6 +246,7 @@ class StableDiffusion(nn.Module):
         # torch.cuda.synchronize(); print(f'[TIME] guiding: unet {time.time() - _t:.4f}s')
 
         # perform guidance (high scale from paper!)
+
         if self.scheduler.config.prediction_type == "v_prediction":
             alphas_cumprod = self.scheduler.alphas_cumprod.to(
                 device=latents_noisy.device, dtype=latents_noisy.dtype
@@ -248,10 +254,11 @@ class StableDiffusion(nn.Module):
             alpha_t = alphas_cumprod[t]**0.5
             sigma_t = (1 - alphas_cumprod[t])**0.5
 
-            noise_pred = latent_model_input * torch.cat([sigma_t] * 2, dim=0).view(
+            noise_pred = latent_model_input * torch.cat([sigma_t] * 3, dim=0).view(
                 -1, 1, 1, 1
-            ) + noise_pred * torch.cat([alpha_t] * 2, dim=0).view(-1, 1, 1, 1)
-        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            ) + noise_pred * torch.cat([alpha_t] * 3, dim=0).view(-1, 1, 1, 1)
+
+        noise_pred_negative, noise_pred_text, noise_pred_uncond = noise_pred.chunk(3)
 
         if clip_ref_img is not None and t < self.cfg.clip_step_range * self.num_train_timesteps:
 
@@ -268,12 +275,24 @@ class StableDiffusion(nn.Module):
                 loss = loss + self.img_text_clip_loss(imgs, [text]) * self.cfg.lambda_clip_text_loss
 
         else:
-            noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_uncond)
-
             # w(t), sigma_t^2
             w = (1 - self.alphas[t])
+
+            # original version from DreamFusion (https://dreamfusion3d.github.io/)
+            # noise_pred = (noise_pred_text - noise) + guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+            # updated version inspired by HumanGuassian (https://arxiv.org/abs/2311.17061) and NFSD (https://arxiv.org/abs/2310.17590)
+            classifier_pred = guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+            if t < 200:
+                negative_pred = w * guidance_scale * (noise_pred_negative - noise_pred_uncond)
+            else:
+                negative_pred = guidance_scale * (noise_pred_negative - noise_pred_uncond)
+
+            noise_pred = classifier_pred - negative_pred
             # w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
-            grad = w * (noise_pred - noise)
+            # grad = w * (noise_pred - noise)
+            grad = w * noise_pred
 
             # clip grad for stable training?
             # grad = grad.clamp(-10, 10)

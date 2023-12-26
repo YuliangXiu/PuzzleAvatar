@@ -40,14 +40,14 @@ def dict_to_prompt(d):
             idx = keys.index(key)
             prompt += f"<asset{idx}> {key}, "
 
-    prompt += "wearing " + " and ".join([
+    prompt += "wearing " + " , ".join([
         f"<asset{keys.index(key)}> {key}" for key in keys if key not in with_classes
     ]) + "."
 
     return d['gender'], prompt
 
 
-#torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
 if __name__ == '__main__':
 
@@ -85,7 +85,7 @@ if __name__ == '__main__':
     cfg.data.keypoints_path = keypoint_path
 
     if cfg.data.load_result_mesh:
-        cfg.data.last_model = os.path.join(opt.exp_dir, 'obj', "subject_geometry.obj")
+        cfg.data.last_model = os.path.join(opt.exp_dir, 'obj', f"{opt.sub_name}_geometry_final.obj")
 
     if not os.path.exists(smplx_path) or not os.path.exists(keypoint_path):
 

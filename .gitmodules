@@ -10,3 +10,7 @@
 	path = thirdparties/GroundingDINO
 	url = https://github.com/IDEA-Research/GroundingDINO.git
 	ignore = dirty
+[submodule "thirdparties/peft"]
+	path = thirdparties/peft
+	url = git@github.com:yfeng95/peft.git
+	ignore = dirty

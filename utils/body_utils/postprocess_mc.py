@@ -24,8 +24,8 @@ smplx_path = glob(f"{args.dir.replace('results', 'examples')}/smplx_*.obj")[0]
 tech_path = f"{args.dir}/obj/{args.name}_geometry.obj"
 smplx_obj = trimesh.load(smplx_path, maintain_orders=True, process=False)
 tech_obj = trimesh.load(tech_path, maintain_orders=True, process=False)
-tech_obj = remesh_laplacian(tech_obj, 1e5)
-tech_obj.export(f"{args.dir}/obj/{args.name}_geometry_remesh.obj")
+# tech_obj = remesh_laplacian(tech_obj, 1e5)
+# tech_obj.export(f"{args.dir}/obj/{args.name}_geometry_remesh.obj")
 
 smpl_tree = cKDTree(smplx_obj.vertices)
 dist, idx = smpl_tree.query(tech_obj.vertices, k=5)
@@ -46,4 +46,4 @@ smplx_hand.remove_unreferenced_vertices()
 
 # combine Tech's body and SMPL-X's hands
 tech_new = sum([tech_body, smplx_hand])
-tech_new_obj = poisson(tech_new, tech_path.replace("geometry", "geometry_new"), depth=10)
+tech_new_obj = poisson(tech_new, tech_path.replace("geometry", "geometry_final"), depth=10)

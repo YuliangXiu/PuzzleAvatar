@@ -141,9 +141,9 @@ guidance:
   normal_text_extra: ''
   textureless_text: null
   textureless_text_extra: ''
-  negative: ''
-  negative_normal: ''
-  negative_textureless: ''
+  negative: 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy'
+  negative_normal: 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy'
+  negative_textureless: 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy'
   controlnet: null
   controlnet_guidance_geometry: null
   controlnet_conditioning_scale: 0.
