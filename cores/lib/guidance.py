@@ -184,6 +184,7 @@ class StableDiffusion(nn.Module):
         text_embeddings,
         pred_rgb,
         guidance_scale=100,
+        stage='geometry',
         controlnet_hint=None,
         controlnet_conditioning_scale=1.0,
         clip_ref_img=None,
@@ -258,12 +259,12 @@ class StableDiffusion(nn.Module):
                 -1, 1, 1, 1
             ) + noise_pred * torch.cat([alpha_t] * 3, dim=0).view(-1, 1, 1, 1)
 
-        noise_pred_negative, noise_pred_text, noise_pred_uncond = noise_pred.chunk(3)
+        noise_pred_negative, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
 
         if clip_ref_img is not None and t < self.cfg.clip_step_range * self.num_train_timesteps:
 
             guidance_scale = self.cfg.clip_guidance_scale
-            noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
             self.scheduler.set_timesteps(self.num_train_timesteps)
             de_latents = self.scheduler.step(noise_pred, t, latents_noisy)['prev_sample']
             imgs = self.decode_latents(de_latents)
@@ -279,24 +280,35 @@ class StableDiffusion(nn.Module):
             w = (1 - self.alphas[t])
 
             # original version from DreamFusion (https://dreamfusion3d.github.io/)
-            # noise_pred = (noise_pred_text - noise) + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            # noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
 
             # updated version inspired by HumanGuassian (https://arxiv.org/abs/2311.17061) and NFSD (https://arxiv.org/abs/2310.17590)
-            classifier_pred = guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+            classifier_pred = guidance_scale * (noise_pred_text - noise_pred_null)
 
             if t < 200:
-                negative_pred = w * guidance_scale * (noise_pred_negative - noise_pred_uncond)
+                if stage == 'geometry':
+                    negative_pred = -noise_pred_null
+                else:
+                    # negative_pred = -noise_pred_null
+                    negative_pred = w * guidance_scale * (noise_pred_negative - noise_pred_null)
             else:
-                negative_pred = guidance_scale * (noise_pred_negative - noise_pred_uncond)
+                if stage == 'geometry':
+                    negative_pred = noise_pred_negative - noise_pred_null
+                else:
+                    # negative_pred = noise_pred_negative - noise_pred_null
+                    negative_pred = guidance_scale * (noise_pred_negative - noise_pred_null)
 
             noise_pred = classifier_pred - negative_pred
-            # w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
-            # grad = w * (noise_pred - noise)
+
             grad = w * noise_pred
 
             # clip grad for stable training?
             # grad = grad.clamp(-10, 10)
-            grad = torch.nan_to_num(grad)
+            # grad = torch.nan_to_num(grad)
+
+            grad_norm = torch.norm(grad, dim=-1, keepdim=True) + 1e-8
+            grad = grad_norm.clamp(max=1.0) * grad / grad_norm
 
             # since we omitted an item in grad, we need to use the custom function to specify the gradient
             # _t = time.time()
@@ -335,10 +347,8 @@ class StableDiffusion(nn.Module):
                     )['sample']
 
                 # perform guidance
-                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                noise_pred = noise_pred_text + guidance_scale * (
-                    noise_pred_text - noise_pred_uncond
-                )
+                noise_pred_null, noise_pred_text = noise_pred.chunk(2)
+                noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents)['prev_sample']

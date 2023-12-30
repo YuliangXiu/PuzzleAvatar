@@ -5,7 +5,15 @@ from .network_utils import HashDecoder
 
 
 class ColorNetwork(nn.Module):
-    def __init__(self, cfg, num_layers=1, hidden_dim=32, hash_max_res=2048, hash_num_levels=16):
+    def __init__(
+        self,
+        cfg,
+        num_layers=1,
+        hidden_dim=32,
+        hash_max_res=2048,
+        hash_num_levels=16,
+        use_eikonal=False
+    ):
         super().__init__()
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
@@ -16,9 +24,10 @@ class ColorNetwork(nn.Module):
             3,
             self.num_layers,
             max_res=hash_max_res,
-            num_levels=hash_num_levels
+            num_levels=hash_num_levels,
+            use_eikonal=use_eikonal,
         )
 
     def forward(self, x):
-        albedo = torch.sigmoid(self.net(x))
+        albedo = torch.sigmoid(self.net(x)[0])
         return albedo

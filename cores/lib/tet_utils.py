@@ -12,6 +12,7 @@ def build_tet_grid(mesh, cfg):
     tet_dir = osp.join(cfg.workspace, 'tet')
     os.makedirs(tet_dir, exist_ok=True)
     save_path = osp.join(tet_dir, 'tet_grid.npz')
+    
     if osp.exists(save_path):
         print('Loading exist tet grids from {}'.format(save_path))
         tets = np.load(save_path)
@@ -19,6 +20,7 @@ def build_tet_grid(mesh, cfg):
         indices = tets['indices']
         print('shape of vertices: {}, shape of grids: {}'.format(vertices.shape, indices.shape))
         return vertices, indices
+    
     print('Building tet grids...')
     tet_flag = False
     tet_shell_offset = cfg.model.tet_shell_offset

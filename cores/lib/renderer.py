@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 import random
 
 import numpy as np
@@ -107,7 +108,8 @@ class Renderer(nn.Module):
                 num_layers=cfg.model.color_num_layers,
                 hidden_dim=cfg.model.color_hidden_dim,
                 hash_max_res=cfg.model.color_hash_max_res,
-                hash_num_levels=cfg.model.color_hash_num_levels
+                hash_num_levels=cfg.model.color_hash_num_levels,
+                use_eikonal=cfg.train.lambda_eik > 0
             )
         else:
             self.texture3d = None
@@ -138,12 +140,20 @@ class Renderer(nn.Module):
                 geo_network=cfg.model.dmtet_network,
                 hash_max_res=cfg.model.geo_hash_max_res,
                 hash_num_levels=cfg.model.geo_hash_num_levels,
-                num_subdiv=cfg.model.tet_num_subdiv
+                num_subdiv=cfg.model.tet_num_subdiv,
+                use_eikonal=cfg.train.lambda_eik > 0
             )
             if self.cfg.train.init_mesh and not self.cfg.test.test:
-                self.dmtet_network.init_mesh(
-                    self.mesh.v, self.mesh.f, self.cfg.train.init_mesh_padding
-                )
+
+                init_dmtet_path = osp.join(cfg.workspace, 'tet/init_mesh.pth')
+                if not osp.exists(init_dmtet_path):
+                    self.dmtet_network.init_mesh(
+                        self.mesh.v, self.mesh.f, self.cfg.train.init_mesh_padding
+                    )
+                    torch.save(self.dmtet_network.state_dict(), init_dmtet_path)
+                else:
+                    self.dmtet_network.load_state_dict(torch.load(init_dmtet_path))
+                    print(f'[INFO] Initialize DMTet with cached init_mesh.pth...')
         else:
             self.mesh = Mesh.load_obj(
                 self.cfg.data.last_model,
@@ -166,7 +176,7 @@ class Renderer(nn.Module):
 
         if cfg.model.use_vertex_tex:
             self.vertex_albedo = nn.Parameter(self.mesh.v_color)
-            
+
         # extract trainable parameters
         if self.dmtet_network is None and not cfg.train.lock_geo:
             self.sdf = nn.Parameter(torch.zeros_like(self.mesh.v[..., 0]))
@@ -194,6 +204,7 @@ class Renderer(nn.Module):
 
         # background network
         self.encoder_bg, self.in_dim_bg = get_encoder('frequency_torch', input_dim=3, multires=4)
+        
         if self.cfg.model.different_bg:
             self.normal_bg_net = MLP(self.in_dim_bg, 3, hidden_dim_bg, num_layers_bg, bias=True)
             self.textureless_bg_net = MLP(
@@ -277,9 +288,7 @@ class Renderer(nn.Module):
         if self.dmtet_network is not None:
             num_subdiv = self.get_num_subdiv()
             with torch.no_grad():
-                verts, faces, loss = self.dmtet_network.get_mesh(
-                    return_loss=False, num_subdiv=num_subdiv
-                )
+                verts, faces, loss = self.dmtet_network.get_mesh(num_subdiv=num_subdiv)
             self.mesh = Mesh(v=verts, f=faces.int(), device='cuda', split=True)
             self.mesh.albedo = torch.ones((2048, 2048, 3), dtype=torch.float).cuda()
             if export_uv:
@@ -352,15 +361,13 @@ class Renderer(nn.Module):
 
         return feats.reshape(self.mesh.albedo.shape)
 
-    def get_mesh(self, return_loss=True, detach_geo=False, global_step=1e7):
+    def get_mesh(self, detach_geo=False, global_step=1e7):
         if self.marching_tets is None and self.dmtet_network is None:
             return Mesh(v=self.mesh.v, base=self.mesh, device='cuda'), None
         loss = None
         if self.cfg.model.use_dmtet_network:
             num_subdiv = self.get_num_subdiv(global_step=global_step)
-            verts, faces, loss = self.dmtet_network.get_mesh(
-                return_loss=return_loss, num_subdiv=num_subdiv
-            )
+            verts, faces, loss = self.dmtet_network.get_mesh(num_subdiv=num_subdiv)
             if detach_geo:
                 verts = verts.detach()
                 faces = faces.detach()
@@ -562,7 +569,6 @@ class Renderer(nn.Module):
         ref_rgb=None,
         ambient_ratio=1.0,
         shading='albedo',
-        return_loss=False,
         alpha_only=False,
         detach_geo=False,
         albedo_ref=False,
@@ -611,9 +617,7 @@ class Renderer(nn.Module):
         results = {}
         geo_reg_loss = None
         if mesh is None:
-            mesh, geo_reg_loss = self.get_mesh(
-                return_loss=return_loss, detach_geo=detach_geo, global_step=global_step
-            )
+            mesh, geo_reg_loss = self.get_mesh(detach_geo=detach_geo, global_step=global_step)
 
         results['mesh'] = mesh
         v = mesh.v    # [N, 3]

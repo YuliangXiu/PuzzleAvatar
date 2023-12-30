@@ -194,7 +194,7 @@ if __name__ == '__main__':
             )
         else:    # adam
             params_list.extend(model.get_params(cfg.train.lr))
-            optimizer = lambda model: torch.optim.Adam(params_list, betas=(0.9, 0.99), eps=1e-15)
+            optimizer = lambda model: torch.optim.AdamW(params_list, betas=(0.9, 0.99), eps=1e-15)
 
         # scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 1) # fixed
         scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(

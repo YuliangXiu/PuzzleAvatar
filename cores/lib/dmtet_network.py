@@ -134,13 +134,16 @@ class DMTetMesh(nn.Module):
         geo_network='mlp',
         hash_max_res=1024,
         hash_num_levels=16,
-        num_subdiv=0
+        num_subdiv=0,
+        use_eikonal=False,
     ) -> None:
         super().__init__()
         self.device = device
         self.tet_v = vertices.to(device)
         self.tet_ind = indices.to(device)
         self.use_explicit = use_explicit
+        self.use_eikonal = use_eikonal
+        
         if self.use_explicit:
             self.sdf = nn.Parameter(torch.zeros_like(self.tet_v[:, 0]), requires_grad=True)
             self.deform = nn.Parameter(torch.zeros_like(self.tet_v), requires_grad=True)
@@ -149,7 +152,10 @@ class DMTetMesh(nn.Module):
         elif geo_network == 'hash':
             pts_bounds = (self.tet_v.min(dim=0)[0], self.tet_v.max(dim=0)[0])
             self.decoder = HashDecoder(
-                input_bounds=pts_bounds, max_res=hash_max_res, num_levels=hash_num_levels
+                input_bounds=pts_bounds,
+                max_res=hash_max_res,
+                num_levels=hash_num_levels,
+                use_eikonal=use_eikonal
             ).to(device)
         self.grid_scale = grid_scale
         self.num_subdiv = num_subdiv
@@ -165,14 +171,14 @@ class DMTetMesh(nn.Module):
                     results.append(self.decoder(tet_v[i * chunk_size:(i + 1) * chunk_size]))
             return torch.cat(results, dim=0)
 
-    def get_mesh(self, return_loss=False, num_subdiv=None):
+    def get_mesh(self, num_subdiv=None):
         if num_subdiv is None:
             num_subdiv = self.num_subdiv
         if self.use_explicit:
             sdf = self.sdf * 1
             deform = self.deform * 1
         else:
-            pred = self.query_decoder(self.tet_v)
+            pred, grad_sdf = self.query_decoder(self.tet_v)
             sdf, deform = pred[:, 0], pred[:, 1:]
         verts_deformed = self.tet_v + torch.tanh(
             deform
@@ -185,18 +191,24 @@ class DMTetMesh(nn.Module):
             )
             verts_deformed = verts_deformed[0]
             tet = tet[0]
-            pred = self.query_decoder(verts_deformed)
+            pred, grad_sdf = self.query_decoder(verts_deformed)
             sdf, _ = pred[:, 0], pred[:, 1:]
         mesh_verts, mesh_faces = kal.ops.conversions.marching_tetrahedra(
             verts_deformed.unsqueeze(0), tet, sdf.unsqueeze(0)
         )    # running MT (batched) to extract surface mesh
 
         mesh_verts, mesh_faces = mesh_verts[0], mesh_faces[0]
-        return mesh_verts, mesh_faces, None
+        return mesh_verts, mesh_faces, grad_sdf
 
     def init_mesh(self, mesh_v, mesh_f, init_padding=0.):
         num_pts = self.tet_v.shape[0]
-        mesh = trimesh.Trimesh(mesh_v.cpu().numpy(), mesh_f.cpu().numpy())
+        
+        if torch.is_tensor(mesh_v):
+            mesh_v = mesh_v.cpu().numpy()
+        if torch.is_tensor(mesh_f):
+            mesh_f = mesh_f.cpu().numpy()
+        mesh = trimesh.Trimesh(mesh_v, mesh_f)
+        
         sdf_tet = torch.tensor(
             mesh_to_sdf.mesh_to_sdf(mesh,
                                     self.tet_v.cpu().numpy()), dtype=torch.float32
@@ -208,9 +220,10 @@ class DMTetMesh(nn.Module):
         if self.use_explicit:
             self.sdf.data[...] = sdf_tet[...]
         else:
+            
             optimizer = torch.optim.Adam(list(self.parameters()), lr=1e-3)
             batch_size = 300000
-            iter = 1000
+            iter = 200
             points, sdf_gt = mesh_to_sdf.sample_sdf_near_surface(mesh)
             valid_idx = (points < self.tet_v.cpu().numpy().min(axis=0)
                         ).sum(-1) + (points > self.tet_v.cpu().numpy().max(axis=0)).sum(-1) == 0
@@ -221,18 +234,31 @@ class DMTetMesh(nn.Module):
             points = torch.cat([points, self.tet_v], dim=0)
             sdf_gt = torch.cat([sdf_gt, sdf_tet], dim=0)
             num_pts = len(points)
+            
             for i in tqdm(range(iter)):
                 sampled_ind = random.sample(range(num_pts), min(batch_size, num_pts))
                 p = points[sampled_ind]
-                pred = self.decoder(p)
-                sdf, deform = pred[:, 0], pred[:, 1:]
-                loss = nn.functional.mse_loss(sdf, sdf_gt[sampled_ind])    # + (deform ** 2).mean()
+                pred, sdf_grad = self.decoder(p)
+                sdf = pred[:, 0]
+
+                recon_loss = nn.functional.mse_loss(
+                    sdf, sdf_gt[sampled_ind]
+                )    # + (deform ** 2).mean()
+
+                if self.use_eikonal:
+                    eikonal_loss = (sdf_grad.norm(dim=-1) - 1).abs().mean()
+                    loss = recon_loss + eikonal_loss * 0.0
+                else:
+                    loss = recon_loss
+
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                
             with torch.no_grad():
-                mesh_v, mesh_f, _ = self.get_mesh(return_loss=False)
+                mesh_v, mesh_f, _ = self.get_mesh()
             pred_mesh = trimesh.Trimesh(mesh_v.cpu().numpy(), mesh_f.cpu().numpy())
+
             print(
                 'fitted mesh with num_vertex {}, num_faces {}'.format(
                     mesh_v.shape[0], mesh_f.shape[0]

@@ -7,15 +7,16 @@ model:
     tet_num_subdiv: 1
     render_ssaa: 4
 train:
-    iters: 10000
-    tet_subdiv_steps: [5000]
+    lr: 0.001
+    iters: 8000
+    tet_subdiv_steps: [3000]
     use_lap_loss: True
     normal_sample_ratio: 1.0
     radius_range: [0.7, 1.3]
     height_range: [-0.4, 0.4]
     theta_range: [60, 120]
     phi_diff: 30
-    face_sample_ratio: 0.3
+    face_sample_ratio: 0.4
     face_height_range: [0., 0.]
     face_radius_range: [0.3, 0.4]
     face_phi_diff: 30
@@ -23,6 +24,8 @@ train:
     face_phi_range: [-90, 90]
     render_relative_normal: True
     lambda_lap: 1e4
+    lambda_depth: 1e1
+    lambda_eik: 1e3
     lambda_sil: 0.
     lambda_normal: 0.
     lambda_recon: 0.

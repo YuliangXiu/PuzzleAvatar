@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
+from kornia.losses import total_variation
 import tqdm
 from PIL import Image
 from rich.console import Console
@@ -493,6 +494,11 @@ class Trainer(object):
                                                            2).contiguous()    # [1, 3, H, W]
             pred_depth = outputs['depth'].reshape(1, H, W)
 
+            if self.cfg.train.lambda_depth > 0:
+                depth_loss = total_variation(pred_depth, reduction='mean')
+                loss += depth_loss * self.cfg.train.lambda_depth
+                # print(f"depth_loss: {depth_loss.item()* self.cfg.train.lambda_depth:.3f}")
+
             if step_mesh is None:
                 step_mesh = outputs['mesh']
 
@@ -529,11 +535,13 @@ class Trainer(object):
                 text_z = self.text_z
                 text_z_novd = self.text_z
 
+            guidance_loss = 0
+
             if self.cfg.guidance.controlnet_openpose_guidance:
                 controlnet_hint = Image.fromarray(
                     (outputs['openpose_map'].detach().cpu().numpy() * 255).astype(np.uint8)
                 )
-                loss = loss + self.guidance.train_step(
+                guidance_loss = self.guidance.train_step(
                     text_z,
                     pred_rgb,
                     guidance_scale=self.cfg.guidance.guidance_scale,
@@ -544,22 +552,38 @@ class Trainer(object):
                     is_face=is_face
                 )
             else:
-                loss = loss + self.guidance.train_step(
+
+                guidance_loss = self.guidance.train_step(
                     text_z,
                     pred_rgb,
                     guidance_scale=self.cfg.guidance.guidance_scale,
+                    stage=self.cfg.stage,
                     poses=data['poses'],
                     text_embedding_novd=text_z_novd,
                     is_face=is_face
                 )
 
-            # smoothness regularizer
+            loss += guidance_loss
 
+            # print(f"guidance_loss: {guidance_loss.item():.3f}")
+
+            # smoothness regularizer
             mesh = outputs['mesh']
+            lap_loss = 0
+            eikonal_loss = 0
+
             if i_shading == 0:
-                if flag_train_geometry and self.cfg.train.lambda_lap > 0:
-                    loss_lap = laplacian_smooth_loss(mesh.v, mesh.f.long())
-                    loss = loss + self.cfg.train.lambda_lap * loss_lap
+                if flag_train_geometry:
+                    if self.cfg.train.lambda_lap > 0:
+                        lap_loss = laplacian_smooth_loss(mesh.v, mesh.f.long())
+                        loss += self.cfg.train.lambda_lap * lap_loss
+                        # print(f"lap_loss: {(self.cfg.train.lambda_lap * lap_loss.item()):.3f}")
+                    if self.cfg.train.lambda_eik > 0:
+                        eikonal_loss = (outputs['geo_reg_loss'].norm(dim=-1) - 1).abs().mean()
+                        loss += self.cfg.train.lambda_eik * eikonal_loss
+                        # print(
+                        #     f"eikonal_loss: {(self.cfg.train.lambda_eik * eikonal_loss.item()):.3f}"
+                        # )
 
         return pred_rgb, pred_depth, loss
 
@@ -994,7 +1018,7 @@ class Trainer(object):
                 # all_gather/reduce the statistics (NCCL only support all_*)
                 if self.world_size > 1:
                     dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-                    loss = loss / self.world_size
+                    loss /= self.world_size
 
                     preds_list = [
                         torch.zeros_like(preds).to(self.device) for _ in range(self.world_size)
@@ -1022,18 +1046,15 @@ class Trainer(object):
                 if self.local_rank == 0:
 
                     # save image
-                    save_path = os.path.join(
-                        self.workspace, 'validation', f'{name}_{self.local_step:04d}_rgb.png'
+                    save_path_tex = os.path.join(
+                        self.workspace, 'validation', f'{name}_{self.local_step:04d}_tex.png'
                     )
-                    save_path_normal = os.path.join(
-                        self.workspace, 'validation', f'{name}_{self.local_step:04d}_normal.png'
-                    )
-                    save_path_depth = os.path.join(
-                        self.workspace, 'validation', f'{name}_{self.local_step:04d}_depth.png'
+                    save_path_geo = os.path.join(
+                        self.workspace, 'validation', f'{name}_{self.local_step:04d}_geo.png'
                     )
 
                     #self.log(f"==> Saving validation image to {save_path}")
-                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    os.makedirs(os.path.dirname(save_path_geo), exist_ok=True)
 
                     pred = preds[0].detach().cpu().numpy()
                     pred = (pred * 255).astype(np.uint8)
@@ -1046,9 +1067,25 @@ class Trainer(object):
                     pred_normal = preds_normal[0].detach().cpu().numpy()
                     pred_normal = (pred_normal * 255).astype(np.uint8)
 
-                    cv2.imwrite(save_path, cv2.cvtColor(pred, cv2.COLOR_RGB2BGR))
-                    cv2.imwrite(save_path_depth, pred_depth)
-                    cv2.imwrite(save_path_normal, cv2.cvtColor(pred_normal, cv2.COLOR_RGB2BGR))
+                    if self.stage == "geometry":
+                        cv2.imwrite(
+                            save_path_geo,
+                            np.concatenate([
+                                cv2.cvtColor(pred_normal, cv2.COLOR_RGB2BGR),
+                                np.repeat(pred_depth[..., None], 3, axis=-1)
+                            ], 1)
+                        )
+                    elif self.stage == "texture":
+                        cv2.imwrite(
+                            save_path_tex,
+                            np.concatenate([
+                                cv2.cvtColor(pred, cv2.COLOR_RGB2BGR),
+                                cv2.cvtColor(pred_normal, cv2.COLOR_RGB2BGR),
+                                np.repeat(pred_depth[..., None], 3, axis=-1)
+                            ], 1)
+                        )
+                    else:
+                        print(f"Unknown stage {self.stage}")
 
                     pbar.set_description(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f})")
                     pbar.update(loader.batch_size)

@@ -126,7 +126,7 @@ def get_encoder(
         encoder = FreqEncoder(input_dim=input_dim, degree=multires)
 
     elif encoding == 'sphere_harmonics':
-        from shencoder import SHEncoder
+        from .shencoder import SHEncoder
         encoder = SHEncoder(input_dim=input_dim, degree=degree)
 
     elif encoding == 'hashgrid':
@@ -215,10 +215,12 @@ class HashDecoder(nn.Module):
         input_bounds=None,
         max_res=1024,
         num_levels=16,
-        interpolation='smoothstep'
+        interpolation='smoothstep',
+        use_eikonal=False,
     ) -> None:
         super().__init__()
         self.input_bounds = input_bounds
+        self.use_eikonal = use_eikonal
         self.embed_fn, input_dims = get_encoder(
             'hashgrid',
             input_dim=3,
@@ -233,30 +235,50 @@ class HashDecoder(nn.Module):
         net = net + (torch.nn.Linear(internal_dims, output_dims, bias=False), )
         self.net = torch.nn.Sequential(*net)
 
-    def gradient(self, p):
+    def analytical_gradient(self, p, sdf):
         p.requires_grad_(True)
-        if self.input_bounds is not None:
-            x = (p - self.input_bounds[0]) / (self.input_bounds[1] - self.input_bounds[0])
-        else:
-            x = p
-        if self.embed_fn is not None:
-            x = self.embed_fn(x)
-        y = self.net(x)
-        d_output = torch.ones_like(y, requires_grad=False, device=y.device)
-        gradients = torch.autograd.grad(
-            outputs=y,
+        sdf_grad = -torch.autograd.grad(
+            outputs=sdf,
             inputs=p,
-            grad_outputs=d_output,
+            grad_outputs=torch.ones_like(sdf, requires_grad=False),
             create_graph=True,
             retain_graph=True,
-            only_inputs=True
         )[0]
-        return gradients.unsqueeze(1)
+        return sdf_grad.unsqueeze(1)
+
+    def numerical_gradient(self, points):
+        eps = 0.01
+        offsets = torch.as_tensor([
+            [eps, 0.0, 0.0],
+            [-eps, 0.0, 0.0],
+            [0.0, eps, 0.0],
+            [0.0, -eps, 0.0],
+            [0.0, 0.0, eps],
+            [0.0, 0.0, -eps],
+        ]).to(points)
+        points_offset = (points[..., None, :] + offsets).clamp(-1.0, 1.0)
+        if self.embed_fn is not None:
+            points_offset = self.embed_fn(points_offset)
+        sdf_offset = self.net(points_offset)
+        sdf_grad = (0.5 * (sdf_offset[..., 0::2, 0] - sdf_offset[..., 1::2, 0]) / eps)
+        return sdf_grad
 
     def forward(self, p):
         if self.input_bounds is not None:
-            p = (p - self.input_bounds[0]) / (self.input_bounds[1] - self.input_bounds[0]) * 2 - 1
+            points = (p -
+                      self.input_bounds[0]) / (self.input_bounds[1] - self.input_bounds[0]) * 2 - 1
+        else:
+            points = p
         if self.embed_fn is not None:
-            p = self.embed_fn(p)
-        out = self.net(p)
-        return out
+            points_hashcode = self.embed_fn(points)
+        else:
+            points_hashcode = points
+
+        sdf = self.net(points_hashcode)
+        
+        if self.use_eikonal:
+            sdf_grad = self.numerical_gradient(points)
+        else:
+            sdf_grad = torch.tensor(0.0).to(sdf)
+            
+        return [sdf, sdf_grad]
