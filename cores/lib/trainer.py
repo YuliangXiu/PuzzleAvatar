@@ -2,6 +2,7 @@ import glob
 import os
 import random
 import time
+import pprint
 
 import cv2
 import imageio
@@ -443,147 +444,142 @@ class Trainer(object):
 
     ### ------------------------------
 
-    def train_step(self, data):
+    def train_step(self, data, verbose=False):
 
-        rand1 = random.random()
-        flag_train_geometry = (not self.cfg.train.lock_geo)
-        if self.cfg.train.train_both:
-            shadings = ['normal', 'albedo']
+        if self.cfg.stage == 'geometry':
+            shading = 'normal'
+            ambient_ratio = 0.1
+        elif self.cfg.stage == 'texture':
+            shading = 'albedo'
             ambient_ratio = 1.0
-        elif rand1 < self.cfg.train.normal_sample_ratio and flag_train_geometry:
-            shadings = ['normal']
-            ambient_ratio = 0.1
-        elif rand1 < self.cfg.train.textureless_sample_ratio and flag_train_geometry:
-            shadings = ['textureless']
-            ambient_ratio = 0.1
         else:
-            rand = random.random()
-            if rand < self.cfg.train.albedo_sample_ratio:
-                shadings = ['albedo']
-                ambient_ratio = 1.0
-            else:
-                shadings = ['lambertian']
-                ambient_ratio = 0.1
+            print(f"Unknown stage: {self.cfg.stage}")
 
         loss = 0
         step_mesh = None
-        for i_shading, shading in enumerate(shadings):
-            mvp = data['mvp']
-            poses = data['poses']
-            H, W = data['H'], data['W']
 
-            rays = get_rays(data['poses'], data['intrinsics'], H, W, -1)
-            rays_o = rays['rays_o']    # [B, N, 3]
-            rays_d = rays['rays_d']    # [B, N, 3]
-            outputs = self.model(
+        loss_dict = {}
+
+        mvp = data['mvp']
+        poses = data['poses']
+        H, W = data['H'], data['W']
+
+        rays = get_rays(data['poses'], data['intrinsics'], H, W, -1)
+        rays_o = rays['rays_o']    # [B, N, 3]
+        rays_d = rays['rays_d']    # [B, N, 3]
+
+        outputs = self.model(
+            rays_o,
+            rays_d,
+            mvp,
+            H,
+            W,
+            poses=poses,
+            ambient_ratio=ambient_ratio,
+            shading=shading,
+            return_openpose_map=self.render_openpose_training,
+            global_step=self.global_step,
+            can_pose=data['can_pose'],
+            mesh=step_mesh
+        )
+        # [1, 3, H, W]
+        pred_rgb = outputs['image'].reshape(1, H, W, 3).permute(0, 3, 1, 2).contiguous()
+        pred_depth = outputs['depth'].reshape(1, H, W)
+
+        pred_norm = None
+
+        if self.cfg.stage == 'texture' and self.epoch < 2:
+
+            outputs_normal = self.model(
                 rays_o,
                 rays_d,
                 mvp,
                 H,
                 W,
                 poses=poses,
-                ambient_ratio=ambient_ratio,
-                shading=shading,
-                return_openpose_map=self.render_openpose_training,
-                global_step=self.global_step,
-                can_pose=data['can_pose'],
-                mesh=step_mesh
+                ambient_ratio=0.1,
+                shading='normal',
+                global_step=self.global_step
             )
-            pred_rgb = outputs['image'].reshape(1, H, W,
-                                                3).permute(0, 3, 1,
-                                                           2).contiguous()    # [1, 3, H, W]
-            pred_depth = outputs['depth'].reshape(1, H, W)
+            pred_norm = outputs_normal['image'].reshape(1, H, W, 3).permute(0, 3, 1, 2).contiguous()
 
-            if self.cfg.train.lambda_depth > 0:
-                depth_loss = total_variation(pred_depth, reduction='mean')
-                loss += depth_loss * self.cfg.train.lambda_depth
-                # print(f"depth_loss: {depth_loss.item()* self.cfg.train.lambda_depth:.3f}")
+        if self.cfg.train.lambda_depth > 0:
+            depth_loss = total_variation(pred_depth, reduction='mean')
+            loss += depth_loss * self.cfg.train.lambda_depth
+            loss_dict['depth_loss'] = f"{depth_loss.item() * self.cfg.train.lambda_depth}:.5f"
 
-            if step_mesh is None:
-                step_mesh = outputs['mesh']
+        if step_mesh is None:
+            step_mesh = outputs['mesh']
 
-            # text embeddings
-            if self.cfg.guidance.use_view_prompt:
-                dirs = data['dir']    # [B,]
-                is_face = data['is_face']
-                if (self.cfg.guidance.normal_text is not None) and len(
-                    self.cfg.guidance.normal_text
-                ) > 0 and shading == 'normal':
-                    if is_face:
-                        text_z_novd = self.face_normal_text_z_novd
-                        text_z = self.face_normal_text_z[dirs]
-                    else:
-                        text_z_novd = self.normal_text_z_novd
-                        text_z = self.normal_text_z[dirs]
-                elif (self.cfg.guidance.textureless_text is not None) and len(
-                    self.cfg.guidance.textureless_text
-                ) > 0 and shading == 'textureless':
-                    if is_face:
-                        text_z_novd = self.face_textureless_text_z_novd
-                        text_z = self.face_textureless_text_z[dirs]
-                    else:
-                        text_z_novd = self.textureless_text_z_novd
-                        text_z = self.textureless_text_z[dirs]
+        # text embeddings
+        if self.cfg.guidance.use_view_prompt:
+            dirs = data['dir']    # [B,]
+            is_face = data['is_face']
+            if (self.cfg.guidance.normal_text
+                is not None) and len(self.cfg.guidance.normal_text) > 0 and shading == 'normal':
+                if is_face:
+                    text_z_novd = self.face_normal_text_z_novd
+                    text_z = self.face_normal_text_z[dirs]
                 else:
-                    if is_face:
-                        text_z_novd = self.face_text_z_novd
-                        text_z = self.face_text_z[dirs]
-                    else:
-                        text_z_novd = self.text_z_novd
-                        text_z = self.text_z[dirs]
+                    text_z_novd = self.normal_text_z_novd
+                    text_z = self.normal_text_z[dirs]
+            elif (self.cfg.guidance.textureless_text is not None) and len(
+                self.cfg.guidance.textureless_text
+            ) > 0 and shading == 'textureless':
+                if is_face:
+                    text_z_novd = self.face_textureless_text_z_novd
+                    text_z = self.face_textureless_text_z[dirs]
+                else:
+                    text_z_novd = self.textureless_text_z_novd
+                    text_z = self.textureless_text_z[dirs]
             else:
-                text_z = self.text_z
-                text_z_novd = self.text_z
+                if is_face:
+                    text_z_novd = self.face_text_z_novd
+                    text_z = self.face_text_z[dirs]
+                else:
+                    text_z_novd = self.text_z_novd
+                    text_z = self.text_z[dirs]
+        else:
+            text_z = self.text_z
+            text_z_novd = self.text_z
 
-            guidance_loss = 0
+        if pred_norm is not None:
+            pred_lst = [pred_rgb, pred_norm]
+        else:
+            pred_lst = [pred_rgb]
+        
+        
+        guidance_loss = self.guidance.train_step(
+            text_z,
+            pred_lst,
+            guidance_scale=self.cfg.guidance.guidance_scale,
+            stage=self.cfg.stage,
+            poses=data['poses'],
+            text_embedding_novd=text_z_novd,
+            is_face=is_face
+        )
 
-            if self.cfg.guidance.controlnet_openpose_guidance:
-                controlnet_hint = Image.fromarray(
-                    (outputs['openpose_map'].detach().cpu().numpy() * 255).astype(np.uint8)
-                )
-                guidance_loss = self.guidance.train_step(
-                    text_z,
-                    pred_rgb,
-                    guidance_scale=self.cfg.guidance.guidance_scale,
-                    controlnet_conditioning_scale=self.cfg.guidance.controlnet_conditioning_scale,
-                    controlnet_hint=controlnet_hint,
-                    poses=data['poses'],
-                    text_embedding_novd=text_z_novd,
-                    is_face=is_face
-                )
-            else:
+        loss += guidance_loss
+        loss_dict['guidance_loss'] = f"{guidance_loss.item():.5f}"
 
-                guidance_loss = self.guidance.train_step(
-                    text_z,
-                    pred_rgb,
-                    guidance_scale=self.cfg.guidance.guidance_scale,
-                    stage=self.cfg.stage,
-                    poses=data['poses'],
-                    text_embedding_novd=text_z_novd,
-                    is_face=is_face
-                )
-
-            loss += guidance_loss
-
-            # print(f"guidance_loss: {guidance_loss.item():.3f}")
+        if self.cfg.stage == 'geometry':
 
             # smoothness regularizer
             mesh = outputs['mesh']
             lap_loss = 0
             eikonal_loss = 0
 
-            if i_shading == 0:
-                if flag_train_geometry:
-                    if self.cfg.train.lambda_lap > 0:
-                        lap_loss = laplacian_smooth_loss(mesh.v, mesh.f.long())
-                        loss += self.cfg.train.lambda_lap * lap_loss
-                        # print(f"lap_loss: {(self.cfg.train.lambda_lap * lap_loss.item()):.3f}")
-                    if self.cfg.train.lambda_eik > 0:
-                        eikonal_loss = (outputs['geo_reg_loss'].norm(dim=-1) - 1).abs().mean()
-                        loss += self.cfg.train.lambda_eik * eikonal_loss
-                        # print(
-                        #     f"eikonal_loss: {(self.cfg.train.lambda_eik * eikonal_loss.item()):.3f}"
-                        # )
+            if self.cfg.train.lambda_lap > 0:
+                lap_loss = laplacian_smooth_loss(mesh.v, mesh.f.long())
+                loss += self.cfg.train.lambda_lap * lap_loss
+                loss_dict['lap_loss'] = f"{lap_loss.item() * self.cfg.train.lambda_lap:.5f}"
+            if self.cfg.train.lambda_eik > 0:
+                eikonal_loss = (outputs['geo_reg_loss'].norm(dim=-1) - 1).abs().mean()
+                loss += self.cfg.train.lambda_eik * eikonal_loss
+                loss_dict['depth_loss'] = f"{eikonal_loss.item() * self.cfg.train.lambda_eik:.5f}"
+
+        if verbose:
+            pprint.pprint(loss_dict)
 
         return pred_rgb, pred_depth, loss
 

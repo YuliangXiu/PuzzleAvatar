@@ -196,11 +196,7 @@ class StableDiffusion(nn.Module):
             unet = self.unet_head
         else:
             unet = self.unet
-        # interp to 512x512 to be fed into vae.
 
-        # _t = time.time()
-        pred_rgb_512 = F.interpolate(pred_rgb, (512, 512), mode='bilinear', align_corners=False)
-        #pred_rgb_512 = pred_rgb
         if controlnet_hint:
             assert self.controlnet is not None
             controlnet_hint = self.controlnet_hint_conversion(controlnet_hint, 512, 512)
@@ -212,8 +208,18 @@ class StableDiffusion(nn.Module):
         )
 
         # encode image into latents with vae, requires grad!
-        # _t = time.time()
-        latents = self.encode_imgs(pred_rgb_512)
+
+        pred_rgb_512 = F.interpolate(pred_rgb[0], (512, 512), mode='bilinear', align_corners=False)
+        pred_blend = pred_rgb_512
+
+        if len(pred_rgb) == 2 and t > 100:
+            pred_norm_512 = F.interpolate(
+                pred_rgb[1], (512, 512), mode='bilinear', align_corners=False
+            )
+            pred_blend = pred_rgb_512 * self.alphas[t] + pred_norm_512 * (1 - self.alphas[t])
+            pred_blend = pred_blend.clamp(0., 1.)
+
+        latents = self.encode_imgs(pred_blend)
         # torch.cuda.synchronize(); print(f'[TIME] guiding: vae enc {time.time() - _t:.4f}s')
 
         # predict the noise residual with unet, NO grad!
@@ -287,33 +293,19 @@ class StableDiffusion(nn.Module):
             classifier_pred = guidance_scale * (noise_pred_text - noise_pred_null)
 
             if t < 200:
-                if stage == 'geometry':
-                    negative_pred = -noise_pred_null
-                else:
-                    # negative_pred = -noise_pred_null
-                    negative_pred = w * guidance_scale * (noise_pred_negative - noise_pred_null)
+                negative_pred = -noise_pred_null
             else:
-                if stage == 'geometry':
-                    negative_pred = noise_pred_negative - noise_pred_null
-                else:
-                    # negative_pred = noise_pred_negative - noise_pred_null
-                    negative_pred = guidance_scale * (noise_pred_negative - noise_pred_null)
+                negative_pred = noise_pred_negative - noise_pred_null
 
             noise_pred = classifier_pred - negative_pred
 
             grad = w * noise_pred
 
-            # clip grad for stable training?
-            # grad = grad.clamp(-10, 10)
-            # grad = torch.nan_to_num(grad)
-
             grad_norm = torch.norm(grad, dim=-1, keepdim=True) + 1e-8
             grad = grad_norm.clamp(max=1.0) * grad / grad_norm
 
             # since we omitted an item in grad, we need to use the custom function to specify the gradient
-            # _t = time.time()
             loss = SpecifyGradient.apply(latents, grad)
-            # torch.cuda.synchronize(); print(f'[TIME] guiding: backward {time.time() - _t:.4f}s')
 
         return loss
 
