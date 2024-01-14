@@ -42,7 +42,6 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers import (
     AutoencoderKL,
-    DDIMScheduler,
     DDPMScheduler,
     DiffusionPipeline,
     UNet2DConditionModel,
@@ -67,7 +66,10 @@ check_min_version("0.12.0")
 
 logger = get_logger(__name__)
 
-UNET_TARGET_MODULES = ["to_q", "to_v", "to_k", "query", "value", "key"]
+UNET_TARGET_MODULES = [
+    "to_q", "to_v", "to_k", "query", "value", "key", "to_out.0", "add_k_proj", "add_v_proj"
+]
+TEXT_ENCODER_TARGET_MODULES = ["embed_tokens", "q_proj", "v_proj"]
 
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
@@ -254,7 +256,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=2e-6,
+        default=3e-5,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument(
@@ -463,6 +465,9 @@ def parse_args(input_args=None):
     else:
         args = parser.parse_args()
 
+    if args.train_text_encoder:
+        args.mixed_precision = "no"
+
     with open(os.path.join(args.instance_data_dir, 'gpt4v_response.json'), 'r') as f:
         gpt4v_response = json.load(f)
     args.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
@@ -513,12 +518,14 @@ class DreamBoothDataset(Dataset):
         size=512,
         center_crop=False,
         flip_p=0.5,
+        sd_version="stable-diffusion-2-1-base",
     ):
         self.size = size
         self.center_crop = center_crop
         self.tokenizer = tokenizer
         self.flip_p = flip_p
         self.gender = gender
+        self.sd_version = sd_version
 
         self.image_transforms = transforms.Compose([
             transforms.Resize((self.size, self.size)),
@@ -572,7 +579,7 @@ class DreamBoothDataset(Dataset):
         self.class_images_path = {}
         if self.class_data_root is not None:
             for class_name in self.initializer_tokens:
-                class_data_dir = Path(class_data_root) / class_name
+                class_data_dir = Path(class_data_root) / self.sd_version / class_name
                 self.class_images_path[class_name] = list(class_data_dir.iterdir())
         else:
             self.class_data_root = None
@@ -663,6 +670,44 @@ class DreamBoothDataset(Dataset):
         return example
 
 
+from typing import Union
+
+
+def padded_stack(
+    tensors: List[torch.Tensor],
+    mode: str = "constant",
+    value: Union[int, float] = 0,
+    dim: int = 0,
+    full_size: int = 10,
+) -> torch.Tensor:
+    """
+    Stack tensors along a dimension and pad them along last dimension to ensure their size is equal.
+
+    Args:
+        tensors (List[torch.Tensor]): list of tensors to stack
+        mode (str): 'constant', 'reflect', 'replicate' or 'circular'. Default: 'constant'
+        value (Union[int, float]): value to use for constant padding
+        dim (int): dimension along which to stack
+        full_size (int): size to pad to
+
+    Returns:
+        torch.Tensor: stacked tensor
+    """
+    def make_padding(pad):
+        padding = [0] * (tensors[0].dim() * 2)
+        padding[tensors[0].dim() * 2 - (dim * 2 + 1)] = pad
+        return padding
+
+    out = torch.stack(
+        [
+            F.pad(x, make_padding(full_size - x.size(dim)), mode=mode, value=value) if full_size -
+            x.size(dim) > 0 else x for x in tensors
+        ],
+        dim=0,
+    )
+    return out
+
+
 def collate_fn(examples, with_prior_preservation=False):
     input_ids = [example["instance_prompt_ids"] for example in examples]
     pixel_values = [example["instance_images"] for example in examples]
@@ -677,8 +722,8 @@ def collate_fn(examples, with_prior_preservation=False):
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
     input_ids = torch.cat(input_ids, dim=0)
-    masks = torch.stack(masks)
-    token_ids = torch.stack(token_ids)
+    masks = padded_stack(masks)
+    token_ids = padded_stack(token_ids)
 
     batch = {
         "input_ids": input_ids,
@@ -784,7 +829,8 @@ class SpatialDreambooth:
             for class_name in self.args.initializer_tokens:
 
                 class_prompt = f"a high-resolution DSLR image of {self.args.gender}, wearing {class_name}"
-                class_images_dir = Path(self.args.class_data_dir) / class_name
+                pretrained_name = self.args.pretrained_model_name_or_path.split("/")[-1]
+                class_images_dir = Path(self.args.class_data_dir) / pretrained_name / class_name
 
                 if not class_images_dir.exists():
                     class_images_dir.mkdir(parents=True)
@@ -804,7 +850,7 @@ class SpatialDreambooth:
 
                     for example in tqdm(
                         sample_dataloader,
-                        desc="Generating class images",
+                        desc=f"Generating {class_name} images",
                         disable=not self.accelerator.is_local_main_process,
                     ):
                         images = pipeline(example["prompt"]).images
@@ -872,7 +918,7 @@ class SpatialDreambooth:
         assert num_added_tokens == self.args.num_of_assets
         self.placeholder_token_ids = self.tokenizer.convert_tokens_to_ids(self.placeholder_tokens)
         self.text_encoder.resize_token_embeddings(len(self.tokenizer))
-        self.args.instance_prompt = "a high-resolution DSLR image of " + " and ".join(
+        self.args.instance_prompt = "a high-resolution DSLR image of a man, wearing " + " and ".join(
             self.placeholder_tokens
         )
 
@@ -890,12 +936,8 @@ class SpatialDreambooth:
                                                                    self.args.num_of_assets]
 
         # Set validation scheduler for logging
-        self.validation_scheduler = DDIMScheduler(
-            beta_start=0.00085,
-            beta_end=0.012,
-            beta_schedule="scaled_linear",
-            clip_sample=False,
-            set_alpha_to_one=False,
+        self.validation_scheduler = DDPMScheduler.from_pretrained(
+            self.args.pretrained_model_name_or_path, subfolder="scheduler"
         )
         self.validation_scheduler.set_timesteps(50)
 
@@ -907,6 +949,17 @@ class SpatialDreambooth:
         self.text_encoder.text_model.encoder.requires_grad_(False)
         self.text_encoder.text_model.final_layer_norm.requires_grad_(False)
         self.text_encoder.text_model.embeddings.position_embedding.requires_grad_(False)
+
+        self.weight_dtype = torch.float32
+        if self.accelerator.mixed_precision == "fp16":
+            weight_dtype = torch.float16
+        elif self.accelerator.mixed_precision == "bf16":
+            weight_dtype = torch.bfloat16
+
+        # Move unet, vae and text_encoder to device and cast to weight_dtype
+        self.unet.to(self.accelerator.device, dtype=self.weight_dtype)
+        self.vae.to(self.accelerator.device, dtype=self.weight_dtype)
+        self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
 
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
@@ -961,6 +1014,7 @@ class SpatialDreambooth:
             tokenizer=self.tokenizer,
             size=self.args.resolution,
             center_crop=self.args.center_crop,
+            sd_version=self.args.pretrained_model_name_or_path.split("/")[-1],
         )
 
         logger.info(f"Placeholder Tokens: {self.placeholder_tokens}")
@@ -1001,17 +1055,6 @@ class SpatialDreambooth:
         ) = self.accelerator.prepare(
             self.unet, self.text_encoder, optimizer, train_dataloader, lr_scheduler
         )
-
-        # For mixed precision training we cast the text_encoder and vae weights to half-precision
-        # as these models are only used for inference, keeping weights in full precision is not required.
-        self.weight_dtype = torch.float32
-        if self.accelerator.mixed_precision == "fp16":
-            self.weight_dtype = torch.float16
-        elif self.accelerator.mixed_precision == "bf16":
-            self.weight_dtype = torch.bfloat16
-
-        # Move vae and text_encoder to device and cast to weight_dtype
-        self.vae.to(self.accelerator.device, dtype=self.weight_dtype)
 
         low_precision_error_string = (
             "Please make sure to always have all model weights in full float32 precision when starting training - even if"
@@ -1115,41 +1158,59 @@ class SpatialDreambooth:
         self.controller = AttentionStore()
         self.register_attention_control(self.controller)
 
-        # BOFT config
-        if self.args.use_boft:
-            config = BOFTConfig(
-                boft_block_size=self.args.boft_block_size,
-                boft_block_num=self.args.boft_block_num,
-                boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
-                target_modules=UNET_TARGET_MODULES,
-                boft_dropout=self.args.boft_dropout,
-                bias=self.args.boft_bias
-            )
-            self.unet = get_peft_model(self.unet, config)
-            self.unet.to(self.accelerator.device)
-            self.unet.requires_grad_(False)
-
         for epoch in range(first_epoch, self.args.num_train_epochs):
+
             self.unet.train()
             if self.args.train_text_encoder:
                 self.text_encoder.train()
+
             for step, batch in enumerate(train_dataloader):
 
                 if self.args.phase1_train_steps == global_step:
 
-                    if self.args.use_boft:
-                        self.unet = get_peft_model(self.unet, config)
-                        self.unet.print_trainable_parameters()
-                    else:
+                    if not self.args.use_boft:
                         self.unet.requires_grad_(True)
+                    else:
+                        unet_config = BOFTConfig(
+                            boft_block_size=self.args.boft_block_size,
+                            boft_block_num=self.args.boft_block_num,
+                            boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
+                            target_modules=UNET_TARGET_MODULES,
+                            boft_dropout=self.args.boft_dropout,
+                            bias=self.args.boft_bias
+                        )
+
+                        self.unet = get_peft_model(self.unet, unet_config)
+                        self.unet.to(self.accelerator.device)
+                        self.unet.print_trainable_parameters()
+
+                        logger.info("***** Training with BOFT fine-tuning (unet) *****")
 
                     if self.args.train_text_encoder:
-                        self.text_encoder.requires_grad_(True)
+                        if not self.args.use_boft:
+                            self.text_encoder.requires_grad_(True)
+                        else:
+                            text_config = BOFTConfig(
+                                boft_block_size=self.args.boft_block_size,
+                                boft_block_num=self.args.boft_block_num,
+                                boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
+                                target_modules=TEXT_ENCODER_TARGET_MODULES,
+                                boft_dropout=self.args.boft_dropout,
+                                bias=self.args.boft_bias
+                            )
+                            self.text_encoder = get_peft_model(self.text_encoder, text_config)
+                            self.text_encoder.to(self.accelerator.device)
+                            self.text_encoder.print_trainable_parameters()
+
+                            logger.info("***** Training with BOFT fine-tuning (text_encoder) *****")
 
                     unet_params = [param for param in self.unet.parameters() if param.requires_grad]
+                    text_params = [
+                        param for param in self.text_encoder.parameters() if param.requires_grad
+                    ]
 
                     params_to_optimize = (
-                        itertools.chain(unet_params, self.text_encoder.parameters())
+                        itertools.chain(unet_params, text_params)
                         if self.args.train_text_encoder else itertools.chain(
                             unet_params,
                             self.text_encoder.get_input_embeddings().parameters(),
@@ -1237,6 +1298,7 @@ class SpatialDreambooth:
 
                         # Compute instance loss
                         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                        logs["inst_loss"] = loss.detach().item()
 
                         # Compute prior loss
                         prior_loss = F.mse_loss(
@@ -1246,6 +1308,7 @@ class SpatialDreambooth:
                         )
 
                         # Add the prior loss to the instance loss.
+                        logs["prior_loss"] = prior_loss.detach().item()
                         loss = loss + self.args.prior_loss_weight * prior_loss
                     else:
                         if self.args.apply_masked_loss:
@@ -1259,6 +1322,7 @@ class SpatialDreambooth:
                     if self.args.lambda_attention != 0:
                         attn_loss = 0
                         for batch_idx in range(self.args.train_batch_size):
+
                             GT_masks = F.interpolate(
                                 input=batch["instance_masks"][batch_idx], size=(16, 16)
                             )
@@ -1268,9 +1332,12 @@ class SpatialDreambooth:
                                 is_cross=True,
                                 select=batch_idx,
                             )
+
                             curr_cond_batch_idx = self.args.train_batch_size + batch_idx
 
-                            for mask_id in range(len(GT_masks)):
+                            valid_masks_num = len(GT_masks.sum(dim=(2, 3)).flatten().nonzero())
+
+                            for mask_id in range(valid_masks_num):
                                 curr_placeholder_token_id = self.placeholder_token_ids[
                                     batch["token_ids"][batch_idx][mask_id]]
 
@@ -1321,23 +1388,15 @@ class SpatialDreambooth:
                     progress_bar.update(1)
                     global_step += 1
 
-                    if global_step % self.args.checkpointing_steps == 0:
+                    if global_step % self.args.checkpointing_steps == 0 and global_step > self.args.phase1_train_steps:
                         if self.accelerator.is_main_process:
-                            save_path = os.path.join(
-                                self.args.output_dir, f"checkpoint-{global_step}"
-                            )
-                            self.accelerator.save_state(save_path)
-                            logger.info(f"Saved state to {save_path}")
+
+                            self.save_adaptor(step=global_step)
 
                     if (
                         self.args.log_checkpoints and global_step % self.args.img_log_steps == 0 and
                         global_step > self.args.phase1_train_steps
                     ):
-                        ckpts_path = os.path.join(
-                            self.args.output_dir, "checkpoints", f"{global_step:05}"
-                        )
-                        os.makedirs(ckpts_path, exist_ok=True)
-                        self.save_pipeline(ckpts_path)
 
                         img_logs_path = os.path.join(self.args.output_dir, "img_logs")
                         os.makedirs(img_logs_path, exist_ok=True)
@@ -1379,21 +1438,38 @@ class SpatialDreambooth:
                 if global_step >= self.args.max_train_steps:
                     break
 
-        self.save_pipeline(self.args.output_dir)
-
         self.accelerator.end_training()
+        self.save_adaptor()
 
-    def save_pipeline(self, path):
-        self.accelerator.wait_for_everyone()
-        if self.accelerator.is_main_process:
+    def save_adaptor(self, step=""):
+
+        if self.args.use_boft:
+
+            unwarpped_unet = self.accelerator.unwrap_model(self.unet)
+            unwarpped_unet.save_pretrained(
+                os.path.join(self.args.output_dir, f"unet/{step}"),
+                state_dict=self.accelerator.get_state_dict(self.unet)
+            )
+            logger.info(f"Saved unet to {os.path.join(self.args.output_dir, f'unet/{step}')}")
+
+            if self.args.train_text_encoder:
+
+                unwarpped_text_encoder = self.accelerator.unwrap_model(self.text_encoder)
+                unwarpped_text_encoder.save_pretrained(
+                    os.path.join(self.args.output_dir, f"text_encoder/{step}"),
+                    state_dict=self.accelerator.get_state_dict(self.text_encoder),
+                    save_embedding_layers=True,
+                )
+                logger.info(
+                    f"Saved text_encoder to {os.path.join(self.args.output_dir, f'text_encoder/{step}')}"
+                )
+        else:
             pipeline = DiffusionPipeline.from_pretrained(
                 self.args.pretrained_model_name_or_path,
                 unet=self.accelerator.unwrap_model(self.unet),
                 text_encoder=self.accelerator.unwrap_model(self.text_encoder),
-                tokenizer=self.tokenizer,
-                revision=self.args.revision,
             )
-            pipeline.save_pretrained(path)
+            pipeline.save_pretrained(self.args.output_dir)
 
     def register_attention_control(self, controller):
         attn_procs = {}
@@ -1481,6 +1557,7 @@ class SpatialDreambooth:
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
             latents = self.validation_scheduler.step(noise_pred, t, latents).prev_sample
+
         latents = 1 / 0.18215 * latents
 
         images = self.vae.decode(latents.to(self.weight_dtype)).sample

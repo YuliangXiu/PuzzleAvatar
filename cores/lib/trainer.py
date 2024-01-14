@@ -553,7 +553,6 @@ class Trainer(object):
             text_z,
             pred_lst,
             guidance_scale=self.cfg.guidance.guidance_scale,
-            stage=self.cfg.stage,
             poses=data['poses'],
             text_embedding_novd=text_z_novd,
             is_face=is_face

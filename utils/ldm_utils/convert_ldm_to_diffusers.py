@@ -880,7 +880,6 @@ def convert_open_clip_checkpoint(checkpoint):
         vocab_size=49408,
         torch_dtype="float32",
     )
-    #text_model = CLIPTextModel.from_pretrained("stabilityai/stable-diffusion-2-1", subfolder="text_encoder")
     text_model = CLIPTextModel(text_config)
     keys = list(checkpoint.keys())
 

@@ -33,6 +33,9 @@ python setup.py install
 cd ../../thirdparties/nvdiffrast
 python setup.py install
 
+cd ../../thirdparties/peft
+python setup.py install
+
 bash scripts/install_dino_sam.sh
 ```
 

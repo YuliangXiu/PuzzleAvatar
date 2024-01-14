@@ -128,7 +128,7 @@ data:
 guidance:
   type: stable-diffusion
   use_view_prompt: True
-  sd_version: 1.5
+  sd_version: 2-1
   guidance_scale: 100.
   step_range: [0.02, 0.25]
   use_dreambooth: True

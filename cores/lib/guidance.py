@@ -9,9 +9,9 @@ from transformers import CLIPTextModel, CLIPTokenizer, logging
 # suppress partial model loading warning
 logging.set_verbosity_error()
 
-import clip
 import numpy as np
 import PIL
+from os.path import join
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -46,7 +46,7 @@ class StableDiffusion(nn.Module):
     def __init__(
         self,
         device,
-        sd_version='2.1',
+        sd_version='2-1',
         hf_key=None,
         sd_step_range=[0.2, 0.98],
         controlnet=None,
@@ -64,31 +64,35 @@ class StableDiffusion(nn.Module):
         if hf_key is not None:
             print(f'[INFO] using hugging face custom model key: {hf_key}')
             model_key = hf_key
-        elif self.sd_version == '2.1':
-            model_key = "stabilityai/stable-diffusion-2-1-base"
-        elif self.sd_version == '2.0':
-            model_key = "stabilityai/stable-diffusion-2-base"
-        elif self.sd_version == '1.5':
-            model_key = "runwayml/stable-diffusion-v1-5"
+
+        if self.sd_version == '2-1':
+            base_model_key = "stabilityai/stable-diffusion-2-1-base"
+        elif self.sd_version == '2-0':
+            base_model_key = "stabilityai/stable-diffusion-2-base"
+        elif self.sd_version == '1-5':
+            base_model_key = "runwayml/stable-diffusion-v1-5"
         else:
             raise ValueError(f'Stable-diffusion version {self.sd_version} not supported.')
-        self.clip_model, _ = clip.load(
-            "ViT-L/14", device=self.device, jit=False, download_root='data/clip_ckpts'
-        )
-        self.clip_model = self.clip_model.eval().requires_grad_(False).to(self.device)
-        self.clip_preprocess = T.Compose([
-            T.Resize((224, 224)),
-            T.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-        ])
+
         # Create model
-        self.vae = AutoencoderKL.from_pretrained(model_key, subfolder="vae").to(self.device)
-        self.tokenizer = CLIPTokenizer.from_pretrained(model_key, subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained(model_key,
+        self.vae = AutoencoderKL.from_pretrained(base_model_key, subfolder="vae").to(self.device)
+        self.tokenizer = CLIPTokenizer.from_pretrained(base_model_key, subfolder="tokenizer")
+        self.text_encoder = CLIPTextModel.from_pretrained(base_model_key,
                                                           subfolder="text_encoder").to(self.device)
-        self.unet = UNet2DConditionModel.from_pretrained(model_key,
+        self.unet = UNet2DConditionModel.from_pretrained(base_model_key,
                                                          subfolder="unet").to(self.device)
 
+        # BOFT adapters loading
+        from peft import PeftModel
+        self.text_encoder = PeftModel.from_pretrained(
+            self.text_encoder, join(model_key, 'text_encoder')
+        )
+        self.unet = PeftModel.from_pretrained(self.unet, join(model_key, 'unet'))
+
+        print(f'[INFO] loaded BOFT adapters!')
+
         self.use_head_model = head_hf_key is not None
+
         if self.use_head_model:
             self.tokenizer_head = CLIPTokenizer.from_pretrained(head_hf_key, subfolder="tokenizer")
             self.text_encoder_head = CLIPTextModel.from_pretrained(
@@ -101,7 +105,7 @@ class StableDiffusion(nn.Module):
             self.text_encoder_head = self.text_encoder
             self.unet_head = self.unet
 
-        self.scheduler = DDIMScheduler.from_pretrained(model_key, subfolder="scheduler")
+        self.scheduler = DDIMScheduler.from_pretrained(base_model_key, subfolder="scheduler")
 
         self.num_train_timesteps = self.scheduler.config.num_train_timesteps
         self.min_step = int(self.num_train_timesteps * sd_step_range[0])
@@ -117,25 +121,6 @@ class StableDiffusion(nn.Module):
             self.unet.load_attn_procs(lora)
 
         print(f'[INFO] loaded stable diffusion!')
-
-    def img_clip_loss(self, rgb1, rgb2):
-        image_z_1 = self.clip_model.encode_image(self.clip_preprocess(rgb1))
-        image_z_2 = self.clip_model.encode_image(self.clip_preprocess(rgb2))
-        image_z_1 = image_z_1 / image_z_1.norm(dim=-1, keepdim=True)    # normalize features
-        image_z_2 = image_z_2 / image_z_2.norm(dim=-1, keepdim=True)    # normalize features
-
-        loss = -(image_z_1 * image_z_2).sum(-1).mean()
-        return loss
-
-    def img_text_clip_loss(self, rgb, prompts):
-        image_z_1 = self.clip_model.encode_image(self.aug(rgb))
-        image_z_1 = image_z_1 / image_z_1.norm(dim=-1, keepdim=True)    # normalize features
-
-        text = clip.tokenize(prompt).to(self.device)
-        text_z = self.clip_model.encode_text(text)
-        text_z = text_z / text_z.norm(dim=-1, keepdim=True)
-        loss = -(image_z_1 * text_z).sum(-1).mean()
-        return loss
 
     def get_text_embeds(self, prompt, negative_prompt, is_face=False):
         print('text prompt: [positive]', prompt, '[negative]', negative_prompt)
@@ -184,10 +169,8 @@ class StableDiffusion(nn.Module):
         text_embeddings,
         pred_rgb,
         guidance_scale=100,
-        stage='geometry',
         controlnet_hint=None,
         controlnet_conditioning_scale=1.0,
-        clip_ref_img=None,
         is_face=False,
         **kwargs
     ):
@@ -267,45 +250,30 @@ class StableDiffusion(nn.Module):
 
         noise_pred_negative, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
 
-        if clip_ref_img is not None and t < self.cfg.clip_step_range * self.num_train_timesteps:
+        # w(t), sigma_t^2
+        w = (1 - self.alphas[t])
 
-            guidance_scale = self.cfg.clip_guidance_scale
-            noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
-            self.scheduler.set_timesteps(self.num_train_timesteps)
-            de_latents = self.scheduler.step(noise_pred, t, latents_noisy)['prev_sample']
-            imgs = self.decode_latents(de_latents)
-            loss = 0
-            if self.cfg.lambda_clip_img_loss > 0:
-                loss = loss + self.img_clip_loss(imgs, clip_ref_img) * self.cfg.lambda_clip_img_loss
-            if self.cfg.lambda_clip_text_loss > 0:
-                text = self.cfg.text.replace('sks', '')
-                loss = loss + self.img_text_clip_loss(imgs, [text]) * self.cfg.lambda_clip_text_loss
+        # original version from DreamFusion (https://dreamfusion3d.github.io/)
+        # noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
 
+        # updated version inspired by HumanGuassian (https://arxiv.org/abs/2311.17061) and NFSD (https://arxiv.org/abs/2310.17590)
+
+        classifier_pred = guidance_scale * (noise_pred_text - noise_pred_null)
+
+        if t < 200:
+            negative_pred = -noise_pred_null
         else:
-            # w(t), sigma_t^2
-            w = (1 - self.alphas[t])
+            negative_pred = noise_pred_negative - noise_pred_null
 
-            # original version from DreamFusion (https://dreamfusion3d.github.io/)
-            # noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
+        noise_pred = classifier_pred - negative_pred
 
-            # updated version inspired by HumanGuassian (https://arxiv.org/abs/2311.17061) and NFSD (https://arxiv.org/abs/2310.17590)
+        grad = w * noise_pred
 
-            classifier_pred = guidance_scale * (noise_pred_text - noise_pred_null)
+        grad_norm = torch.norm(grad, dim=-1, keepdim=True) + 1e-8
+        grad = grad_norm.clamp(max=1.0) * grad / grad_norm
 
-            if t < 200:
-                negative_pred = -noise_pred_null
-            else:
-                negative_pred = noise_pred_negative - noise_pred_null
-
-            noise_pred = classifier_pred - negative_pred
-
-            grad = w * noise_pred
-
-            grad_norm = torch.norm(grad, dim=-1, keepdim=True) + 1e-8
-            grad = grad_norm.clamp(max=1.0) * grad / grad_norm
-
-            # since we omitted an item in grad, we need to use the custom function to specify the gradient
-            loss = SpecifyGradient.apply(latents, grad)
+        # since we omitted an item in grad, we need to use the custom function to specify the gradient
+        loss = SpecifyGradient.apply(latents, grad)
 
         return loss
 

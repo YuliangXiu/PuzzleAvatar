@@ -10,6 +10,7 @@ logs
 *.egg-info
 *.pt
 *.txt
+.vscode
 OPENAI_API_KEY
 cores/lib/freqencoder/build
 cores/lib/gridencoder/build

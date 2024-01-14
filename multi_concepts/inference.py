@@ -21,86 +21,152 @@ import random
 import numpy as np
 
 import torch
-from diffusers import DDIMScheduler, DiffusionPipeline
+from diffusers import StableDiffusionPipeline, DDPMScheduler
+from diffusers.utils.import_utils import is_xformers_available
+from peft import PeftModel
 
 
 class BreakASceneInference:
     def __init__(self):
+
+        self.prompt_words = None
+        self.classes = None
+        self.placeholder_tokens = None
+        self.gender = None
+
         self._parse_args()
+        self._load_prompts()
         self._load_pipeline()
+
+    def _load_prompts(self):
+
+        with open(os.path.join(self.args.instance_dir, 'gpt4v_response.json'), 'r') as f:
+            gpt4v_response = json.load(f)
+            self.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
+            self.classes = list(gpt4v_response.keys())
+            self.classes.remove("gender")
+            self.classes.remove("eyeglasses")
+
+            self.placeholder_tokens = [f"<asset{i}>" for i in range(len(self.classes))]
+            self.prompt_words = [
+                f"{self.placeholder_tokens[i]} {self.classes[i]}" for i in range(len(self.classes))
+            ]
 
     def _parse_args(self):
         parser = argparse.ArgumentParser()
+        parser.add_argument("--pretrained_model_name_or_path", type=str, required=True)
         parser.add_argument("--model_dir", type=str, required=True)
         parser.add_argument("--instance_dir", type=str, required=True)
         parser.add_argument("--num_samples", type=int, required=True)
+        parser.add_argument("--step", type=str, default="")
         parser.add_argument("--output_dir", type=str, default="outputs/result.jpg")
         parser.add_argument("--device", type=str, default="cuda")
         self.args = parser.parse_args()
 
         self.args.output_dir = os.path.join(self.args.model_dir, "output")
+        os.makedirs(self.args.output_dir, exist_ok=True)
 
     def _load_pipeline(self):
-        self.pipeline = DiffusionPipeline.from_pretrained(
-            self.args.model_dir,
-            torch_dtype=torch.float16,
+
+        person_id = self.args.model_dir.split("/")[-1]
+
+        self.pipeline = StableDiffusionPipeline.from_pretrained(
+            self.args.pretrained_model_name_or_path,
+            torch_dtype=torch.float32,
+            requires_safety_checker=False,
         )
-        self.pipeline.scheduler = DDIMScheduler(
-            beta_start=0.00085,
-            beta_end=0.012,
-            beta_schedule="scaled_linear",
-            clip_sample=False,
-            set_alpha_to_one=False,
+
+        num_added_tokens = self.pipeline.tokenizer.add_tokens(self.placeholder_tokens)
+        print(f"Added {num_added_tokens} tokens")
+        self.pipeline.text_encoder.resize_token_embeddings(len(self.pipeline.tokenizer))
+
+        self.pipeline.scheduler = DDPMScheduler.from_pretrained(
+            self.args.pretrained_model_name_or_path, subfolder="scheduler"
         )
+
+        if not isinstance(self.pipeline.text_encoder, PeftModel):
+            self.pipeline.text_encoder = PeftModel.from_pretrained(
+                self.pipeline.text_encoder,
+                os.path.join(self.args.model_dir, "text_encoder", self.args.step),
+                adapter_name=person_id,
+            )
+            print(f"Loaded text encoder into Non-PeftModel from {self.args.model_dir}")
+        else:
+            self.pipeline.text_encoder.load_adapter(
+                os.path.join(self.args.model_dir, "text_encoder", self.args.step),
+                adapter_name=person_id,
+            )
+            print(f"Loaded text encoder into PeftModel from {self.args.model_dir}")
+
+        if not isinstance(self.pipeline.unet, PeftModel):
+            self.pipeline.unet = PeftModel.from_pretrained(
+                self.pipeline.unet,
+                os.path.join(self.args.model_dir, "unet", self.args.step),
+                adapter_name=person_id,
+            )
+            print(f"Loaded unet into Non-PeftModel from {self.args.model_dir}")
+        else:
+            self.pipeline.unet.load_adapter(
+                os.path.join(self.args.model_dir, "unet", self.args.step),
+                adapter_name=person_id,
+            )
+            print(f"Loaded unet into PeftModel from {self.args.model_dir}")
+
+        # self.pipeline.text_encoder.set_adapter(person_id)
+        # self.pipeline.unet.set_adapter(person_id)
+
+        self.pipeline.text_encoder.eval()
+        self.pipeline.unet.eval()
+
+        if is_xformers_available():
+            self.pipeline.unet.enable_xformers_memory_efficient_attention()
+
         self.pipeline.to(self.args.device)
 
     @torch.no_grad()
     def infer_and_save(self, prompts, tokens):
-        images = self.pipeline(prompts, guidance_scale=7.5).images
+
+        images = self.pipeline(prompts, guidance_scale=7.5, num_inference_steps=30).images
+
         if not os.path.exists(self.args.output_dir):
             os.makedirs(self.args.output_dir, exist_ok=True)
+
         for idx in range(len(images)):
-            print(prompts[idx])
             images[idx].save(os.path.join(self.args.output_dir, f"img{idx:02d}_{tokens[idx]}.png"))
 
 
 if __name__ == "__main__":
-    break_a_scene_inference = BreakASceneInference()
-    with open(
-        os.path.join(break_a_scene_inference.args.instance_dir, 'gpt4v_response.json'), 'r'
-    ) as f:
-        gpt4v_response = json.load(f)
 
-    gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
-    classes = list(gpt4v_response.keys())
-    classes.remove("gender")
-    classes.remove("eyeglasses")
-    
-    placeholders = [f"<asset{i}>" for i in range(len(classes))]
-    prompt_words = [f"{placeholders[i]} {classes[i]}" for i in range(len(classes))]
+    break_a_scene_inference = BreakASceneInference()
 
     prompts = []
     tokens = []
-    with_ids = [classes.index(cls) for cls in ['face', 'haircut']]
+    with_ids = [break_a_scene_inference.classes.index(cls) for cls in ['face', 'haircut']]
 
     for i in range(break_a_scene_inference.args.num_samples):
-        num_of_tokens = random.randrange(1, len(classes) + 1)
-        tokens_ids_to_use = sorted(random.sample(range(len(classes)), k=num_of_tokens))
-        prompt_head = f"a high-resolution DSLR image of {gender}, "
-        tokens.append("_".join([f"{id}_{classes[id]}" for id in tokens_ids_to_use]))
+        num_of_tokens = random.randrange(1, len(break_a_scene_inference.classes) + 1)
+        tokens_ids_to_use = sorted(
+            random.sample(range(len(break_a_scene_inference.classes)), k=num_of_tokens)
+        )
+        prompt_head = f"a high-resolution DSLR image of {break_a_scene_inference.gender}, "
+        tokens.append(
+            "_".join([f"{id}_{break_a_scene_inference.classes[id]}" for id in tokens_ids_to_use])
+        )
 
         if not np.isin(with_ids, tokens_ids_to_use).any():
             prompt_garments = "wearing " + " and ".join([
-                prompt_words[i] for i in tokens_ids_to_use
+                break_a_scene_inference.prompt_words[i] for i in tokens_ids_to_use
             ]) + "."
         else:
             for with_id in with_ids:
                 if with_id in tokens_ids_to_use:
-                    prompt_head += f"{prompt_words[with_id]}, "
+                    prompt_head += f"{break_a_scene_inference.prompt_words[with_id]}, "
             prompt_garments = "wearing " + " and ".join([
-                prompt_words[id] for id in tokens_ids_to_use if id not in with_ids
+                break_a_scene_inference.prompt_words[id]
+                for id in tokens_ids_to_use if id not in with_ids
             ]) + "."
-        
+
         prompts.append(f"{prompt_head}{prompt_garments}".replace(", wearing .", "."))
+        # print(prompts)
 
     break_a_scene_inference.infer_and_save(prompts=prompts, tokens=tokens)

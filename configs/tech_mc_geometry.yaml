@@ -39,6 +39,7 @@ data:
     load_back_normal: False
     
 guidance:
+    sd_version: 2-1
     normal_text: "a smooth and detailed sculpture of"
     use_view_prompt: True
     guidance_scale: 7.5

@@ -1,0 +1,28 @@
+{
+    "favorites.resources": [
+        {
+            "filePath": "results/multi_concepts/human/yuliang/img_logs",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/multi_concepts/human/yuliang/output",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/human_yuliang/train_multi_concepts.err",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/multi_concepts/human/yuliang/text_encoder",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/multi_concepts/human/yuliang/unet",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/human_yuliang/test_multi_concepts.err",
+            "group": "Default"
+        }
+    ]
+}
