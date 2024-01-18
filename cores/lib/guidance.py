@@ -46,6 +46,7 @@ class StableDiffusion(nn.Module):
     def __init__(
         self,
         device,
+        placeholders,
         sd_version='2-1',
         hf_key=None,
         sd_step_range=[0.2, 0.98],
@@ -58,6 +59,7 @@ class StableDiffusion(nn.Module):
         self.cfg = cfg
         self.device = device
         self.sd_version = sd_version
+        self.placeholders = placeholders
 
         print(f'[INFO] loading stable diffusion...')
 
@@ -66,7 +68,7 @@ class StableDiffusion(nn.Module):
             model_key = hf_key
 
         if self.sd_version == '2-1':
-            base_model_key = "stabilityai/stable-diffusion-2-1-base"
+            base_model_key = "stabilityai/stable-diffusion-2-1"
         elif self.sd_version == '2-0':
             base_model_key = "stabilityai/stable-diffusion-2-base"
         elif self.sd_version == '1-5':
@@ -83,6 +85,11 @@ class StableDiffusion(nn.Module):
                                                          subfolder="unet").to(self.device)
 
         # BOFT adapters loading
+
+        num_added_tokens = self.tokenizer.add_tokens(self.placeholders)
+        print(f"Added {num_added_tokens} tokens")
+        self.text_encoder.resize_token_embeddings(len(self.tokenizer))
+
         from peft import PeftModel
         self.text_encoder = PeftModel.from_pretrained(
             self.text_encoder, join(model_key, 'text_encoder')

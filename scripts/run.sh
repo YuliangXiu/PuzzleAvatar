@@ -8,10 +8,8 @@ export SUBJECT_NAME=$3
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 
 # Step 0: Run DINO+SAM
-rm -rf examples/multi_concepts/human/yuliang/mask
-python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR}
-python multi_concepts/islands_all.py
-
+python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR} --overwrite
+python multi_concepts/islands_all.py --out_dir ${INPUT_DIR} --overwrite
 
 # Step 1: Run geometry stage (Run on a single GPU)
 # rm -rf results/multi_concepts/human/yuliang/geometry

@@ -23,6 +23,18 @@
         {
             "filePath": "logs/human_yuliang/test_multi_concepts.err",
             "group": "Default"
+        },
+        {
+            "filePath": "logs/human_yuliang/run.err",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/multi_concepts/human/yuliang/geometry/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/multi_concepts/human/yuliang/texture/validation",
+            "group": "Default"
         }
     ]
 }

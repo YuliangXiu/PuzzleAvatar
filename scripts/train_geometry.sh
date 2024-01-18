@@ -1,9 +1,9 @@
 #!/bin/bash
 source ./scripts/env.sh
 
-rm -rf results/multi_concepts/human/yuliang/geometry/checkpoints
-rm -rf results/multi_concepts/human/yuliang/geometry/run
-rm -rf results/multi_concepts/human/yuliang/geometry/validation
+rm -rf results/$1/geometry/checkpoints
+rm -rf results/$1/geometry/run
+rm -rf results/$1/geometry/validation
 
 python cores/main_mc.py \
  --config configs/tech_mc_geometry.yaml \

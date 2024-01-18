@@ -49,7 +49,8 @@ class BreakASceneInference:
 
             self.placeholder_tokens = [f"<asset{i}>" for i in range(len(self.classes))]
             self.prompt_words = [
-                f"{self.placeholder_tokens[i]} {self.classes[i]}" for i in range(len(self.classes))
+                f"{self.placeholder_tokens[i]} {gpt4v_response[self.classes[i]]} {self.classes[i]}"
+                for i in range(len(self.classes))
             ]
 
     def _parse_args(self):

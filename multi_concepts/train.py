@@ -66,10 +66,18 @@ check_min_version("0.12.0")
 
 logger = get_logger(__name__)
 
+# UNET_TARGET_MODULES = [
+#     "to_q", "to_v", "to_k", "to_out.0", "conv", "conv1", "conv2", "conv_in", "conv_out"
+#     "conv_shortcut", "proj_in", "proj_out", "time_emb_proj", "ff.net.2"
+# ]
+
 UNET_TARGET_MODULES = [
-    "to_q", "to_v", "to_k", "query", "value", "key", "to_out.0", "add_k_proj", "add_v_proj"
+    "to_q", "to_v", "to_k", "to_out.0", "proj_in", "proj_out", "time_emb_proj", "ff.net.2"
 ]
-TEXT_ENCODER_TARGET_MODULES = ["embed_tokens", "q_proj", "v_proj"]
+
+TEXT_ENCODER_TARGET_MODULES = [
+    "embed_tokens", "fc1", "fc2", "q_proj", "k_proj", "v_proj", "out_proj"
+]
 
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
@@ -94,12 +102,12 @@ def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: st
         raise ValueError(f"{model_class} is not supported.")
 
 
-def parse_args(input_args=None):
+def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
-        default="stabilityai/stable-diffusion-2-1-base",
+        default="stabilityai/stable-diffusion-2-1",
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
@@ -460,10 +468,7 @@ def parse_args(input_args=None):
         help="Indicator to log intermediate model checkpoints",
     )
 
-    if input_args is not None:
-        args, = parser.parse_args(input_args)
-    else:
-        args = parser.parse_args()
+    args = parser.parse_args()
 
     if args.train_text_encoder:
         args.mixed_precision = "no"
@@ -498,7 +503,7 @@ def parse_args(input_args=None):
         if args.class_prompt is not None:
             warnings.warn("You need not use --class_prompt without --with_prior_preservation.")
 
-    return args
+    return args, gpt4v_response
 
 
 class DreamBoothDataset(Dataset):
@@ -512,13 +517,14 @@ class DreamBoothDataset(Dataset):
         placeholder_tokens,
         tokenizer,
         initializer_tokens,
+        gpt4v_response,
         num_class_images,
         gender,
         class_data_root=None,
         size=512,
         center_crop=False,
         flip_p=0.5,
-        sd_version="stable-diffusion-2-1-base",
+        sd_version="stable-diffusion-2-1",
     ):
         self.size = size
         self.center_crop = center_crop
@@ -526,6 +532,7 @@ class DreamBoothDataset(Dataset):
         self.flip_p = flip_p
         self.gender = gender
         self.sd_version = sd_version
+        self.gpt4v_response = gpt4v_response
 
         self.image_transforms = transforms.Compose([
             transforms.Resize((self.size, self.size)),
@@ -555,12 +562,14 @@ class DreamBoothDataset(Dataset):
             self.image_transforms(Image.open(path))[:3] for path in instance_img_paths
         ]
         self.instance_masks = []
+        self.instance_descriptions = []
 
         for i in range(len(instance_img_paths)):
             instance_mask_paths = glob.glob(f"{instance_data_root}/mask/{i:02d}_*.png")
             instance_mask = []
             instance_placeholder_token = []
             instance_class_tokens = []
+            instance_description = []
 
             for instance_mask_path in instance_mask_paths:
                 curr_mask = Image.open(instance_mask_path)
@@ -571,10 +580,12 @@ class DreamBoothDataset(Dataset):
                     self.placeholder_full[self.initializer_tokens.index(curr_token)]
                 )
                 instance_class_tokens.append(curr_token)
+                instance_description.append(self.gpt4v_response[curr_token])
 
             self.instance_masks.append(torch.cat(instance_mask))
             self.placeholder_tokens.append(instance_placeholder_token)
             self.class_tokens.append(instance_class_tokens)
+            self.instance_descriptions.append(instance_description)
 
         self.class_images_path = {}
         if self.class_data_root is not None:
@@ -604,14 +615,18 @@ class DreamBoothDataset(Dataset):
         classes_to_use = [
             self.class_tokens[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
         ]
+        descs_to_use = [
+            self.instance_descriptions[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
+        ]
 
         prompt_head = f"a high-resolution DSLR image of a {self.gender}"
         with_classes = ['face', 'haircut']
 
         if not np.isin(with_classes, classes_to_use).any():
             prompt = f"{prompt_head}, wearing " + " and ".join([
-                f"{placeholder_token} {class_token}"
-                for (placeholder_token, class_token) in zip(tokens_to_use, classes_to_use)
+                f"{placeholder_token} {desc} {class_token}"
+                for (placeholder_token, desc,
+                     class_token) in zip(tokens_to_use, descs_to_use, classes_to_use)
             ]) + "."
         else:
             prompt = f"{prompt_head}, "
@@ -620,12 +635,13 @@ class DreamBoothDataset(Dataset):
             for name in with_classes:
                 if name in classes_to_use:
                     idx = classes_to_use.index(name)
-                    prompt += f"{tokens_to_use[idx]} {name}, "
+                    prompt += f"{tokens_to_use[idx]} {descs_to_use[idx]} {name}, "
 
             # wearing {garment} and {eyeglasses}
             prompt += "wearing " + " and ".join([
-                f"{placeholder_token} {class_token}"
-                for (placeholder_token, class_token) in zip(tokens_to_use, classes_to_use)
+                f"{placeholder_token} {desc} {class_token}"
+                for (placeholder_token, desc,
+                     class_token) in zip(tokens_to_use, descs_to_use, classes_to_use)
                 if class_token not in with_classes
             ]) + "."
 
@@ -764,7 +780,7 @@ def get_full_repo_name(
 
 class SpatialDreambooth:
     def __init__(self):
-        self.args = parse_args()
+        self.args, self.gpt4v_response = parse_args()
         self.main()
 
     def main(self):
@@ -1008,6 +1024,7 @@ class SpatialDreambooth:
             instance_data_root=self.args.instance_data_dir,
             placeholder_tokens=self.placeholder_tokens,
             initializer_tokens=self.args.initializer_tokens,
+            gpt4v_response=self.gpt4v_response,
             num_class_images=self.args.num_class_images,
             gender=self.args.gender,
             class_data_root=self.args.class_data_dir if self.args.with_prior_preservation else None,
@@ -1185,6 +1202,7 @@ class SpatialDreambooth:
                         self.unet.print_trainable_parameters()
 
                         logger.info("***** Training with BOFT fine-tuning (unet) *****")
+                        print("Structure of UNet be like: \n", self.unet, "\n")
 
                     if self.args.train_text_encoder:
                         if not self.args.use_boft:
@@ -1393,10 +1411,7 @@ class SpatialDreambooth:
 
                             self.save_adaptor(step=global_step)
 
-                    if (
-                        self.args.log_checkpoints and global_step % self.args.img_log_steps == 0 and
-                        global_step > self.args.phase1_train_steps
-                    ):
+                    if (self.args.log_checkpoints and global_step % self.args.img_log_steps == 0):
 
                         img_logs_path = os.path.join(self.args.output_dir, "img_logs")
                         os.makedirs(img_logs_path, exist_ok=True)

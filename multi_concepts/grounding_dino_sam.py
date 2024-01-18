@@ -21,7 +21,16 @@ from scipy import ndimage
 
 def enhance_class_name(class_names: List[str]) -> List[str]:
 
-    return [f"all {class_name}s" for class_name in class_names]
+    new_class_names = []
+    for class_name in class_names:
+        if class_name == 'haircut':
+            new_class_names.append('all haircuts hair')
+        elif class_name == 'face':
+            new_class_names.append('all facial face')
+        else:
+            new_class_names.append(f"all {class_name}")
+    
+    return new_class_names
 
 
 # Function to encode the image
@@ -126,9 +135,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--in_dir', type=str, required=True, help="input image folder")
     parser.add_argument('--out_dir', type=str, required=True, help="output mask folder")
+    parser.add_argument('--overwrite', action="store_true")
     opt = parser.parse_args()
 
-    os.makedirs(f"{opt.out_dir}/mask", exist_ok=True)
+    if not os.path.exists(f"{opt.out_dir}/mask"):
+        os.makedirs(f"{opt.out_dir}/mask", exist_ok=True)
+
+    if opt.overwrite:
+        for f in os.listdir(f"{opt.out_dir}/mask"):
+            os.remove(os.path.join(f"{opt.out_dir}/mask", f))
+
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # paths
@@ -151,7 +167,7 @@ if __name__ == '__main__':
     sam_predictor = SamPredictor(sam)
 
     BOX_TRESHOLD = 0.30
-    TEXT_TRESHOLD = 0.25
+    TEXT_TRESHOLD = 0.20
 
     json_path = f"{opt.out_dir}/gpt4v_response.json"
     if not os.path.exists(json_path):
@@ -212,6 +228,7 @@ if __name__ == '__main__':
 
         # remove the overlapping area
         for cls_id, mask in mask_final.items():
+
             if cls_id not in [CLASSES.index("face"), CLASSES.index("eyeglasses")]:
                 mask_other = np.zeros_like(mask)
                 other_cls_ids = list(mask_final.keys())
@@ -222,28 +239,24 @@ if __name__ == '__main__':
             else:
                 if cls_id == CLASSES.index("face"):
                     struct = np.ones((3, 3))
-                    mask_final[cls_id] = ndimage.binary_dilation(
+                    
+                    mask = ndimage.binary_dilation(
                         np.logical_or(mask, mask_final[CLASSES.index("eyeglasses")]),
-                        structure=struct, iterations=3
+                        structure=struct,
+                        iterations=3
                     ).astype(np.uint8) * 255
+                    
+                    mask = ndimage.binary_erosion(
+                        np.logical_and(mask, 1.0-mask_final[CLASSES.index("haircut")]),
+                        structure=struct,
+                        iterations=3
+                    ).astype(np.uint8) * 255
+                    mask_final[cls_id] = mask
                 else:
                     mask_final[cls_id] = mask
 
-            if cls_id != CLASSES.index("eyeglasses"):
+            if cls_id != CLASSES.index("eyeglasses") and (mask_final[cls_id]/255.0).sum() > 500:
                 cv2.imwrite(
                     f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
                     mask_final[cls_id].astype(np.uint8)
                 )
-
-        # # merge face and eyeglasses
-        # for cls_id, mask in mask_final.items():
-        #     if cls_id == CLASSES.index("face"):
-        #         mask_final[cls_id] = ndimage.binary_closing(
-        #             np.logical_or(mask_final[cls_id], mask_final[CLASSES.index("eyeglasses")]),
-        #             structure=np.ones((3, 3))
-        #         ).astype(np.uint8) * 255
-
-        #     cv2.imwrite(
-        #         f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
-        #         mask_final[cls_id].astype(np.uint8)
-        #     )

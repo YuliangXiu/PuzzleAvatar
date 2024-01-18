@@ -38,13 +38,17 @@ def dict_to_prompt(d):
     for key in with_classes:
         if key in keys:
             idx = keys.index(key)
-            prompt += f"<asset{idx}> {key}, "
+            prompt += f"<asset{idx}> {d[key]} {key}, "
 
     prompt += "wearing " + " , ".join([
-        f"<asset{keys.index(key)}> {key}" for key in keys if key not in with_classes
+        f"<asset{keys.index(key)}> {d[key]} {key}" for key in keys if key not in with_classes
     ]) + "."
+    
+    placeholders = []
+    for key in keys:
+        placeholders.append(f"<asset{keys.index(key)}>")
 
-    return d['gender'], prompt
+    return d['gender'], prompt, placeholders
 
 
 # torch.autograd.set_detect_anomaly(True)
@@ -74,7 +78,7 @@ if __name__ == '__main__':
             os.path.join(opt.exp_dir.replace("results", "examples"), 'gpt4v_response.json'), 'r'
         ) as f:
             gpt4v_response = json.load(f)
-            gender, cfg.guidance.text = dict_to_prompt(gpt4v_response)
+            gender, cfg.guidance.text, placeholders = dict_to_prompt(gpt4v_response)
 
             print(f"Using prompt: {cfg.guidance.text}")
 
@@ -171,6 +175,7 @@ if __name__ == '__main__':
             from cores.lib.guidance import StableDiffusion
             guidance = StableDiffusion(
                 device,
+                placeholders,
                 cfg.guidance.sd_version,
                 cfg.guidance.hf_key,
                 cfg.guidance.step_range,
