@@ -149,7 +149,7 @@ if __name__ == "__main__":
         tokens_ids_to_use = sorted(
             random.sample(range(len(break_a_scene_inference.classes)), k=num_of_tokens)
         )
-        prompt_head = f"a high-resolution DSLR image of {break_a_scene_inference.gender}, "
+        prompt_head = f"a high-resolution DSLR image of a {break_a_scene_inference.gender}, "
         tokens.append(
             "_".join([f"{id}_{break_a_scene_inference.classes[id]}" for id in tokens_ids_to_use])
         )

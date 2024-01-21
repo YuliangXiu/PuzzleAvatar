@@ -35,6 +35,26 @@
         {
             "filePath": "results/multi_concepts/human/yuliang/texture/validation",
             "group": "Default"
+        },
+        {
+            "filePath": "results/human/yuliang/img_logs",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/human/yuliang/output",
+            "group": "Default"
+        },
+        {
+            "filePath": "data/human/yuliang/packed",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/03594/outfit03",
+            "group": "Default"
+        },
+        {
+            "filePath": "data/PuzzleIOI/puzzle/03594/outfit03",
+            "group": "Default"
         }
     ]
 }

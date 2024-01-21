@@ -1,8 +1,8 @@
 executable = ./scripts/ground_sam.sh
-arguments = examples/$(dir)
-error = ./logs/$(subject)/ground_sam.err
-output = ./logs/$(subject)/ground_sam.out
-log = ./logs/$(subject)/ground_sam.log
+arguments = data/$(dir)
+error = ./logs/$(subject)/$(outfit)/ground_sam.err
+output = ./logs/$(subject)/$(outfit)/ground_sam.out
+log = ./logs/$(subject)/$(outfit)/ground_sam.log
 
 request_memory = 20000
 request_disk = 10G
@@ -10,4 +10,4 @@ request_cpus = 8
 request_gpus = 1
 requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDAGlobalMemoryMb > 60000 && CUDADeviceName == "NVIDIA A100-SXM4-80GB")
 
-queue dir,subject from ./clusters/subjects.txt
+queue dir,subject,outfit from ./clusters/subjects.txt

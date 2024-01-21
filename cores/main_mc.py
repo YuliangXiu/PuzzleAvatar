@@ -75,7 +75,7 @@ if __name__ == '__main__':
 
     if cfg.guidance.text is None:
         with open(
-            os.path.join(opt.exp_dir.replace("results", "examples"), 'gpt4v_response.json'), 'r'
+            os.path.join(opt.exp_dir.replace("results", "data"), 'gpt4v_response.json'), 'r'
         ) as f:
             gpt4v_response = json.load(f)
             gender, cfg.guidance.text, placeholders = dict_to_prompt(gpt4v_response)
@@ -83,8 +83,8 @@ if __name__ == '__main__':
             print(f"Using prompt: {cfg.guidance.text}")
 
     # create smplx base meshes wrt gender
-    smplx_path = os.path.join(opt.exp_dir.replace("results", "examples"), f"smplx_{gender}.obj")
-    keypoint_path = os.path.join(opt.exp_dir.replace("results", "examples"), f"smplx_{gender}.npy")
+    smplx_path = os.path.join(opt.exp_dir.replace("results", "data"), f"smplx_{gender}.obj")
+    keypoint_path = os.path.join(opt.exp_dir.replace("results", "data"), f"smplx_{gender}.npy")
     cfg.data.last_model = smplx_path
     cfg.data.keypoints_path = keypoint_path
 

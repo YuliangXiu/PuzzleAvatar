@@ -66,11 +66,6 @@ check_min_version("0.12.0")
 
 logger = get_logger(__name__)
 
-# UNET_TARGET_MODULES = [
-#     "to_q", "to_v", "to_k", "to_out.0", "conv", "conv1", "conv2", "conv_in", "conv_out"
-#     "conv_shortcut", "proj_in", "proj_out", "time_emb_proj", "ff.net.2"
-# ]
-
 UNET_TARGET_MODULES = [
     "to_q", "to_v", "to_k", "to_out.0", "proj_in", "proj_out", "time_emb_proj", "ff.net.2"
 ]
@@ -842,9 +837,13 @@ class SpatialDreambooth:
             pipeline.set_progress_bar_config(disable=True)
             pipeline.to(self.accelerator.device)
 
-            for class_name in self.args.initializer_tokens:
+            for class_name in self.args.initializer_tokens + [self.args.gender]:
 
-                class_prompt = f"a high-resolution DSLR image of {self.args.gender}, wearing {class_name}"
+                if class_name == self.args.gender:
+                    class_prompt = f"a high-resolution DSLR image of a {self.args.gender}"
+                else:
+                    class_prompt = f"a high-resolution DSLR image of a {self.args.gender}, wearing {class_name}"
+
                 pretrained_name = self.args.pretrained_model_name_or_path.split("/")[-1]
                 class_images_dir = Path(self.args.class_data_dir) / pretrained_name / class_name
 
@@ -1221,6 +1220,7 @@ class SpatialDreambooth:
                             self.text_encoder.print_trainable_parameters()
 
                             logger.info("***** Training with BOFT fine-tuning (text_encoder) *****")
+                            print("Structure of Text Encoder be like: \n", self.text_encoder, "\n")
 
                     unet_params = [param for param in self.unet.parameters() if param.requires_grad]
                     text_params = [
@@ -1234,6 +1234,7 @@ class SpatialDreambooth:
                             self.text_encoder.get_input_embeddings().parameters(),
                         )
                     )
+
                     del optimizer
                     optimizer = optimizer_class(
                         params_to_optimize,

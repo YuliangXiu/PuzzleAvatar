@@ -5,14 +5,14 @@ export BASE_MODEL=stabilityai/stable-diffusion-2-1
 
 python multi_concepts/train.py \
   --pretrained_model_name_or_path $BASE_MODEL \
-  --instance_data_dir examples/$1  \
+  --instance_data_dir data/$1  \
   --output_dir results/$1 \
   --class_data_dir data/multi_concepts_data \
   --train_batch_size 2  \
   --phase1_train_steps 1000 \
   --phase2_train_steps 2000 \
   --initial_learning_rate 5e-4 \
-  --learning_rate 5e-5 \
+  --learning_rate 2e-6 \
   --lambda_attention 1e-2 \
   --img_log_steps 500 \
   --checkpointing_steps 500 \
@@ -30,5 +30,5 @@ rm -rf results/$1/output
 python multi_concepts/inference.py \
   --pretrained_model_name_or_path $BASE_MODEL \
   --model_dir results/$1 \
-  --instance_dir examples/$1 \
+  --instance_dir data/$1 \
   --num_samples 10

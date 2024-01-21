@@ -20,7 +20,7 @@ smplx_container = SMPLX()
 device = torch.device(f"cuda:{args.gpu}")
 
 # load smplx and TeCH objs
-smplx_path = glob(f"{args.dir.replace('results', 'examples')}/smplx_*.obj")[0]
+smplx_path = glob(f"{args.dir.replace('results', 'data')}/smplx_*.obj")[0]
 tech_path = f"{args.dir}/obj/{args.name}_geometry.obj"
 smplx_obj = trimesh.load(smplx_path, maintain_orders=True, process=False)
 tech_obj = trimesh.load(tech_path, maintain_orders=True, process=False)

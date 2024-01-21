@@ -13,7 +13,7 @@ if __name__ == "__main__":
     parser.add_argument('--out_dir', type=str, required=True, help="output mask folder")
     parser.add_argument('--overwrite', action="store_true")
     opt = parser.parse_args()
-    
+
     output_dir = f"{opt.out_dir}/packed"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
@@ -38,7 +38,7 @@ if __name__ == "__main__":
         if len(mask_paths) > 0:
             masks = [cv2.imread(mask_path) for mask_path in mask_paths]
             images = [
-                cv2.imread("_".join(mask_path.replace("mask", "image").split("_")[:2]) + ".jpg")
+                cv2.imread("_".join(mask_path.replace("mask", "image").split("_")[:1]) + ".jpg")
                 for mask_path in mask_paths
             ]
 
@@ -56,7 +56,15 @@ if __name__ == "__main__":
                 sizes.append((w, h))
                 corners.append((x, y))
 
-            positions = rpack.pack(sizes)
+            max_h = max([item[1] for item in sizes])
+            max_w = max([item[0] for item in sizes])
+            
+            positions = rpack.pack(
+                sizes,
+                max_height=int(np.sqrt(len(mask_paths)) + 2) * max_h,
+                max_width=int(np.sqrt(len(mask_paths)) + 2) * max_w
+            )
+            
             carvas_w = max([p[0] + sizes[idx][0] for idx, p in enumerate(positions)])
             carvas_h = max([p[1] + sizes[idx][1] for idx, p in enumerate(positions)])
             positions = [(p[0], carvas_h - p[1] - sizes[idx][1]) for idx, p in enumerate(positions)]
