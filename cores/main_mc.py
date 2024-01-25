@@ -25,7 +25,7 @@ def load_config(path, default_path=None):
 
 def dict_to_prompt(d):
 
-    prompt = "a high-resolution DSLR image of"
+    prompt = "a high-resolution DSLR colored image of"
     keys = list(d.keys())
     gender = "man" if d['gender'] == "male" else "woman"
     keys.remove("gender")

@@ -21,7 +21,7 @@ import random
 import numpy as np
 
 import torch
-from diffusers import StableDiffusionPipeline, DDPMScheduler
+from diffusers import DiffusionPipeline, DDPMScheduler
 from diffusers.utils.import_utils import is_xformers_available
 from peft import PeftModel
 
@@ -45,13 +45,22 @@ class BreakASceneInference:
             self.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
             self.classes = list(gpt4v_response.keys())
             self.classes.remove("gender")
-            self.classes.remove("eyeglasses")
+            for key in ["eyeglasses", "sunglasses", "glasses"]:
+                if key in self.classes:
+                    self.classes.remove(key)
 
             self.placeholder_tokens = [f"<asset{i}>" for i in range(len(self.classes))]
-            self.prompt_words = [
-                f"{self.placeholder_tokens[i]} {gpt4v_response[self.classes[i]]} {self.classes[i]}"
-                for i in range(len(self.classes))
-            ]
+
+            if self.args.use_shape_description:
+                self.prompt_words = [
+                    f"{self.placeholder_tokens[i]} {gpt4v_response[self.classes[i]]} {self.classes[i]}"
+                    for i in range(len(self.classes))
+                ]
+            else:
+                self.prompt_words = [
+                    f"{self.placeholder_tokens[i]} {self.classes[i]}"
+                    for i in range(len(self.classes))
+                ]
 
     def _parse_args(self):
         parser = argparse.ArgumentParser()
@@ -62,6 +71,8 @@ class BreakASceneInference:
         parser.add_argument("--step", type=str, default="")
         parser.add_argument("--output_dir", type=str, default="outputs/result.jpg")
         parser.add_argument("--device", type=str, default="cuda")
+        parser.add_argument("--use_peft", type=str, default="none")
+        parser.add_argument("--use_shape_description", action="store_true")
         self.args = parser.parse_args()
 
         self.args.output_dir = os.path.join(self.args.model_dir, "output")
@@ -71,57 +82,48 @@ class BreakASceneInference:
 
         person_id = self.args.model_dir.split("/")[-1]
 
-        self.pipeline = StableDiffusionPipeline.from_pretrained(
-            self.args.pretrained_model_name_or_path,
-            torch_dtype=torch.float32,
-            requires_safety_checker=False,
-        )
+        if self.args.use_peft != "none":
 
-        num_added_tokens = self.pipeline.tokenizer.add_tokens(self.placeholder_tokens)
-        print(f"Added {num_added_tokens} tokens")
-        self.pipeline.text_encoder.resize_token_embeddings(len(self.pipeline.tokenizer))
+            self.pipeline = DiffusionPipeline.from_pretrained(
+                self.args.pretrained_model_name_or_path,
+                torch_dtype=torch.float32,
+                requires_safety_checker=False,
+            )
 
-        self.pipeline.scheduler = DDPMScheduler.from_pretrained(
-            self.args.pretrained_model_name_or_path, subfolder="scheduler"
-        )
+            num_added_tokens = self.pipeline.tokenizer.add_tokens(self.placeholder_tokens)
+            print(f"Added {num_added_tokens} tokens")
+            self.pipeline.text_encoder.resize_token_embeddings(len(self.pipeline.tokenizer))
 
-        if not isinstance(self.pipeline.text_encoder, PeftModel):
+            self.pipeline.scheduler = DDPMScheduler.from_pretrained(
+                self.args.pretrained_model_name_or_path, subfolder="scheduler"
+            )
+
             self.pipeline.text_encoder = PeftModel.from_pretrained(
                 self.pipeline.text_encoder,
                 os.path.join(self.args.model_dir, "text_encoder", self.args.step),
                 adapter_name=person_id,
             )
-            print(f"Loaded text encoder into Non-PeftModel from {self.args.model_dir}")
-        else:
-            self.pipeline.text_encoder.load_adapter(
-                os.path.join(self.args.model_dir, "text_encoder", self.args.step),
-                adapter_name=person_id,
-            )
-            print(f"Loaded text encoder into PeftModel from {self.args.model_dir}")
 
-        if not isinstance(self.pipeline.unet, PeftModel):
             self.pipeline.unet = PeftModel.from_pretrained(
                 self.pipeline.unet,
                 os.path.join(self.args.model_dir, "unet", self.args.step),
                 adapter_name=person_id,
             )
-            print(f"Loaded unet into Non-PeftModel from {self.args.model_dir}")
+            self.pipeline.text_encoder.eval()
+            self.pipeline.unet.eval()
+
         else:
-            self.pipeline.unet.load_adapter(
-                os.path.join(self.args.model_dir, "unet", self.args.step),
-                adapter_name=person_id,
+
+            self.pipeline = DiffusionPipeline.from_pretrained(
+                self.args.model_dir,
+                torch_dtype=torch.float32,
+                requires_safety_checker=False,
             )
-            print(f"Loaded unet into PeftModel from {self.args.model_dir}")
-
-        # self.pipeline.text_encoder.set_adapter(person_id)
-        # self.pipeline.unet.set_adapter(person_id)
-
-        self.pipeline.text_encoder.eval()
-        self.pipeline.unet.eval()
 
         if is_xformers_available():
             self.pipeline.unet.enable_xformers_memory_efficient_attention()
 
+        # self.pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
         self.pipeline.to(self.args.device)
 
     @torch.no_grad()
@@ -149,7 +151,7 @@ if __name__ == "__main__":
         tokens_ids_to_use = sorted(
             random.sample(range(len(break_a_scene_inference.classes)), k=num_of_tokens)
         )
-        prompt_head = f"a high-resolution DSLR image of a {break_a_scene_inference.gender}, "
+        prompt_head = f"a high-resolution DSLR colored image of a {break_a_scene_inference.gender}, "
         tokens.append(
             "_".join([f"{id}_{break_a_scene_inference.classes[id]}" for id in tokens_ids_to_use])
         )

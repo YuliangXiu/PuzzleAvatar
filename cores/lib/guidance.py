@@ -96,6 +96,9 @@ class StableDiffusion(nn.Module):
         )
         self.unet = PeftModel.from_pretrained(self.unet, join(model_key, 'unet'))
 
+        # enable FreeU
+        # self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+
         print(f'[INFO] loaded BOFT adapters!')
 
         self.use_head_model = head_hf_key is not None

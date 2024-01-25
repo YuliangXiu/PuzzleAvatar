@@ -46,7 +46,7 @@ from diffusers import (
     DiffusionPipeline,
     UNet2DConditionModel,
 )
-from diffusers.models.cross_attention import CrossAttention
+from diffusers.models.attention_processor import Attention
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
@@ -60,19 +60,14 @@ from transformers import AutoTokenizer, PretrainedConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../thirdparties/peft/src"))
 
-from peft import BOFTConfig, get_peft_model
+from peft import LoraConfig, BOFTConfig, get_peft_model
 
 check_min_version("0.12.0")
 
 logger = get_logger(__name__)
 
-UNET_TARGET_MODULES = [
-    "to_q", "to_v", "to_k", "to_out.0", "proj_in", "proj_out", "time_emb_proj", "ff.net.2"
-]
-
-TEXT_ENCODER_TARGET_MODULES = [
-    "embed_tokens", "fc1", "fc2", "q_proj", "k_proj", "v_proj", "out_proj"
-]
+UNET_TARGET_MODULES = ["to_q", "to_v", "to_k", "proj_in", "proj_out"]
+TEXT_ENCODER_TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj"]
 
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
@@ -154,7 +149,19 @@ def parse_args():
         dest="with_prior_preservation"
     )
     parser.add_argument(
+        "--use_shape_description",
+        action="store_true",
+        help="Flag to use shape description loss.",
+    )
+
+    parser.add_argument(
         "--prior_loss_weight",
+        type=float,
+        default=1.0,
+        help="The weight of prior preservation loss.",
+    )
+    parser.add_argument(
+        "--person_prior_loss_weight",
         type=float,
         default=1.0,
         help="The weight of prior preservation loss.",
@@ -418,9 +425,10 @@ def parse_args():
     )
     # boft args
     parser.add_argument(
-        "--use_boft",
-        action="store_true",
-        help="Whether to use BOFT for parameter efficient tuning"
+        "--use_peft",
+        type=str,
+        default="none",
+        help="which peft to use, can be 'none', 'lora' or 'boft'",
     )
     parser.add_argument("--boft_block_num", type=int, default=4, help="The number of BOFT blocks")
     parser.add_argument("--boft_block_size", type=int, default=0, help="The size of BOFT blocks")
@@ -432,13 +440,20 @@ def parse_args():
         "--boft_dropout",
         type=float,
         default=0.1,
-        help="BOFT dropout, only used if use_boft is True"
+        help="BOFT dropout, only used if use_peft is 'boft'",
     )
     parser.add_argument(
         "--boft_bias",
         type=str,
         default="none",
-        help="Bias type for BOFT. Can be 'none', 'all' or 'boft_only', only used if use_boft is True"
+        help=
+        "Bias type for BOFT. Can be 'none', 'all' or 'boft_only', only used if use_peft is 'boft'",
+    )
+    parser.add_argument(
+        "--lora_r",
+        type=int,
+        default=64,
+        help="The number of Lora rank",
     )
 
     parser.add_argument("--lambda_attention", type=float, default=1e-2)
@@ -474,7 +489,9 @@ def parse_args():
     gpt4v_classes = list(gpt4v_response.keys())
 
     gpt4v_classes.remove("gender")
-    gpt4v_classes.remove("eyeglasses")
+    for key in ["eyeglasses", "sunglasses", "glasses"]:
+        if key in gpt4v_classes:
+            gpt4v_classes.remove(key)
 
     args.num_of_assets = len(gpt4v_classes)
     args.initializer_tokens = gpt4v_classes
@@ -513,6 +530,7 @@ class DreamBoothDataset(Dataset):
         tokenizer,
         initializer_tokens,
         gpt4v_response,
+        use_shape_desc,
         num_class_images,
         gender,
         class_data_root=None,
@@ -528,6 +546,7 @@ class DreamBoothDataset(Dataset):
         self.gender = gender
         self.sd_version = sd_version
         self.gpt4v_response = gpt4v_response
+        self.use_shape_desc = use_shape_desc
 
         self.image_transforms = transforms.Compose([
             transforms.Resize((self.size, self.size)),
@@ -584,7 +603,7 @@ class DreamBoothDataset(Dataset):
 
         self.class_images_path = {}
         if self.class_data_root is not None:
-            for class_name in self.initializer_tokens:
+            for class_name in self.initializer_tokens + [self.gender]:
                 class_data_dir = Path(class_data_root) / self.sd_version / class_name
                 self.class_images_path[class_name] = list(class_data_dir.iterdir())
         else:
@@ -610,12 +629,16 @@ class DreamBoothDataset(Dataset):
         classes_to_use = [
             self.class_tokens[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
         ]
+
         descs_to_use = [
             self.instance_descriptions[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
         ]
 
-        prompt_head = f"a high-resolution DSLR image of a {self.gender}"
-        with_classes = ['face', 'haircut']
+        if not self.use_shape_desc:
+            descs_to_use = ["" for _ in descs_to_use]
+
+        prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
+        with_classes = ['face', 'haircut', 'hair']
 
         if not np.isin(with_classes, classes_to_use).any():
             prompt = f"{prompt_head}, wearing " + " and ".join([
@@ -626,7 +649,7 @@ class DreamBoothDataset(Dataset):
         else:
             prompt = f"{prompt_head}, "
 
-            # with {face} and {haircut}
+            # with {face} and {haircut} and {hair}
             for name in with_classes:
                 if name in classes_to_use:
                     idx = classes_to_use.index(name)
@@ -641,17 +664,20 @@ class DreamBoothDataset(Dataset):
             ]) + "."
 
         prompt = prompt.replace(", wearing .", ".")
-        # print(prompt)
+        prompt = prompt.replace("  ", " ")
 
         example["instance_images"] = self.instance_images[index % example_len]
         example["instance_masks"] = self.instance_masks[index % example_len][tokens_ids_to_use]
         example["token_ids"] = torch.tensor([
             self.placeholder_full.index(token) for token in tokens_to_use
         ])
+        example["full_masks"] = self.instance_masks[index %
+                                                    example_len].max(dim=0, keepdims=True).values
 
         if random.random() > self.flip_p:
             example["instance_images"] = TF.hflip(example["instance_images"])
             example["instance_masks"] = TF.hflip(example["instance_masks"])
+            example["full_masks"] = TF.hflip(example["full_masks"])
 
         example["instance_prompt_ids"] = self.tokenizer(
             prompt,
@@ -662,6 +688,8 @@ class DreamBoothDataset(Dataset):
         ).input_ids
 
         if self.class_data_root:
+
+            # for assets
             class_token = random.choice(classes_to_use)
             class_image = Image.open(
                 self.class_images_path[class_token][index % self.num_class_images]
@@ -671,7 +699,22 @@ class DreamBoothDataset(Dataset):
             example["class_images"] = self.image_transforms(class_image)
             with_wear_class = f"wearing {class_token}" if class_token not in with_classes else f"{class_token}"
             example["class_prompt_ids"] = self.tokenizer(
-                f"a high-resolution DSLR image of a {self.gender}, {with_wear_class}.",
+                f"a high-resolution DSLR colored image of a {self.gender}, {with_wear_class}.",
+                truncation=True,
+                padding="max_length",
+                max_length=self.tokenizer.model_max_length,
+                return_tensors="pt",
+            ).input_ids
+
+            # for full human
+            person_image = Image.open(
+                self.class_images_path[self.gender][index % self.num_class_images]
+            )
+            if not person_image.mode == "RGB":
+                person_image = person_image.convert("RGB")
+            example["person_images"] = self.image_transforms(person_image)
+            example["person_prompt_ids"] = self.tokenizer(
+                f"a high-resolution DSLR colored image of a {self.gender} wearing daily clothes.",
                 truncation=True,
                 padding="max_length",
                 max_length=self.tokenizer.model_max_length,
@@ -723,16 +766,20 @@ def collate_fn(examples, with_prior_preservation=False):
     input_ids = [example["instance_prompt_ids"] for example in examples]
     pixel_values = [example["instance_images"] for example in examples]
     masks = [example["instance_masks"] for example in examples]
+    full_masks = [example["full_masks"] for example in examples]
     token_ids = [example["token_ids"] for example in examples]
 
     if with_prior_preservation:
-        input_ids = [example["class_prompt_ids"] for example in examples] + input_ids
-        pixel_values = [example["class_images"] for example in examples] + pixel_values
+        input_ids = [example["person_prompt_ids"] for example in examples
+                    ] + [example["class_prompt_ids"] for example in examples] + input_ids
+        pixel_values = [example["person_images"] for example in examples
+                       ] + [example["class_images"] for example in examples] + pixel_values
 
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
     input_ids = torch.cat(input_ids, dim=0)
+    full_masks = torch.cat(full_masks, dim=0)
     masks = padded_stack(masks)
     token_ids = padded_stack(token_ids)
 
@@ -740,6 +787,7 @@ def collate_fn(examples, with_prior_preservation=False):
         "input_ids": input_ids,
         "pixel_values": pixel_values,
         "instance_masks": masks,
+        "full_masks": full_masks,
         "token_ids": token_ids,
     }
     return batch
@@ -834,15 +882,26 @@ class SpatialDreambooth:
                 safety_checker=None,
                 revision=self.args.revision,
             )
+            # pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
             pipeline.set_progress_bar_config(disable=True)
             pipeline.to(self.accelerator.device)
 
             for class_name in self.args.initializer_tokens + [self.args.gender]:
 
+                prompt_head = f"a high-resolution DSLR colored image of a {self.args.gender}"
+
                 if class_name == self.args.gender:
-                    class_prompt = f"a high-resolution DSLR image of a {self.args.gender}"
+                    class_prompt = f"{prompt_head} wearing daily clothes."
+                elif class_name in ["face", "haircut", "hair"]:
+                    if self.args.use_shape_description:
+                        class_prompt = f"{prompt_head}, {self.gpt4v_response[class_name]} {class_name}."
+                    else:
+                        class_prompt = f"{prompt_head}, {class_name}."
                 else:
-                    class_prompt = f"a high-resolution DSLR image of a {self.args.gender}, wearing {class_name}"
+                    if self.args.use_shape_description:
+                        class_prompt = f"{prompt_head}, wearing {self.gpt4v_response[class_name]} {class_name}."
+                    else:
+                        class_prompt = f"{prompt_head}, wearing {class_name}."
 
                 pretrained_name = self.args.pretrained_model_name_or_path.split("/")[-1]
                 class_images_dir = Path(self.args.class_data_dir) / pretrained_name / class_name
@@ -933,7 +992,7 @@ class SpatialDreambooth:
         assert num_added_tokens == self.args.num_of_assets
         self.placeholder_token_ids = self.tokenizer.convert_tokens_to_ids(self.placeholder_tokens)
         self.text_encoder.resize_token_embeddings(len(self.tokenizer))
-        self.args.instance_prompt = "a high-resolution DSLR image of a man, wearing " + " and ".join(
+        self.args.instance_prompt = "a high-resolution DSLR colored image of a man, wearing " + " and ".join(
             self.placeholder_tokens
         )
 
@@ -1024,6 +1083,7 @@ class SpatialDreambooth:
             placeholder_tokens=self.placeholder_tokens,
             initializer_tokens=self.args.initializer_tokens,
             gpt4v_response=self.gpt4v_response,
+            use_shape_desc=self.args.use_shape_description,
             num_class_images=self.args.num_class_images,
             gender=self.args.gender,
             class_data_root=self.args.class_data_dir if self.args.with_prior_preservation else None,
@@ -1184,17 +1244,27 @@ class SpatialDreambooth:
 
                 if self.args.phase1_train_steps == global_step:
 
-                    if not self.args.use_boft:
+                    if self.args.use_peft == "none":
                         self.unet.requires_grad_(True)
+
                     else:
-                        unet_config = BOFTConfig(
-                            boft_block_size=self.args.boft_block_size,
-                            boft_block_num=self.args.boft_block_num,
-                            boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
-                            target_modules=UNET_TARGET_MODULES,
-                            boft_dropout=self.args.boft_dropout,
-                            bias=self.args.boft_bias
-                        )
+                        if self.args.use_peft == "boft":
+                            unet_config = BOFTConfig(
+                                boft_block_size=self.args.boft_block_size,
+                                boft_block_num=self.args.boft_block_num,
+                                boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
+                                target_modules=UNET_TARGET_MODULES,
+                                boft_dropout=self.args.boft_dropout,
+                                bias=self.args.boft_bias
+                            )
+                        elif self.args.use_peft == "lora":
+
+                            unet_config = LoraConfig(
+                                r=self.args.lora_r,
+                                target_modules=UNET_TARGET_MODULES,
+                                lora_dropout=self.args.boft_dropout,
+                                bias="lora_only"
+                            )
 
                         self.unet = get_peft_model(self.unet, unet_config)
                         self.unet.to(self.accelerator.device)
@@ -1204,17 +1274,26 @@ class SpatialDreambooth:
                         print("Structure of UNet be like: \n", self.unet, "\n")
 
                     if self.args.train_text_encoder:
-                        if not self.args.use_boft:
+                        if self.args.use_peft == "none":
                             self.text_encoder.requires_grad_(True)
                         else:
-                            text_config = BOFTConfig(
-                                boft_block_size=self.args.boft_block_size,
-                                boft_block_num=self.args.boft_block_num,
-                                boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
-                                target_modules=TEXT_ENCODER_TARGET_MODULES,
-                                boft_dropout=self.args.boft_dropout,
-                                bias=self.args.boft_bias
-                            )
+                            if self.args.use_peft == "boft":
+                                text_config = BOFTConfig(
+                                    boft_block_size=self.args.boft_block_size,
+                                    boft_block_num=self.args.boft_block_num,
+                                    boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
+                                    target_modules=TEXT_ENCODER_TARGET_MODULES,
+                                    boft_dropout=self.args.boft_dropout,
+                                    bias=self.args.boft_bias
+                                )
+                            elif self.args.use_peft == "lora":
+                                text_config = LoraConfig(
+                                    r=self.args.lora_r,
+                                    target_modules=TEXT_ENCODER_TARGET_MODULES,
+                                    lora_dropout=self.args.boft_dropout,
+                                    bias="lora_only"
+                                )
+
                             self.text_encoder = get_peft_model(self.text_encoder, text_config)
                             self.text_encoder.to(self.accelerator.device)
                             self.text_encoder.print_trainable_parameters()
@@ -1306,18 +1385,48 @@ class SpatialDreambooth:
 
                     if self.args.with_prior_preservation:
                         # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
-                        model_pred_prior, model_pred = torch.chunk(model_pred, 2, dim=0)
-                        target_prior, target = torch.chunk(target, 2, dim=0)
+                        model_pred_person_prior, model_pred_prior, model_pred = torch.chunk(
+                            model_pred, 3, dim=0
+                        )
+                        target_person_prior, target_prior, target = torch.chunk(target, 3, dim=0)
 
                         if self.args.apply_masked_loss:
                             max_masks = torch.max(batch["instance_masks"], axis=1).values
+                            full_masks = batch["full_masks"]
                             downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
+                            downsampled_full_mask = F.interpolate(input=full_masks, size=(64, 64))
+
+                            # full masked
+                            model_pred_full = model_pred * downsampled_full_mask
+                            target_full = target * downsampled_full_mask
+
+                            # partial masked
                             model_pred = model_pred * downsampled_mask
                             target = target * downsampled_mask
 
+                        loss = 0.
+
+                        # full body prior
+                        full_loss = F.mse_loss(
+                            model_pred_person_prior.float(),
+                            target_person_prior.float(),
+                            reduction="mean"
+                        )
+
+                        logs["l_full"] = full_loss.detach().item()
+                        loss += self.args.person_prior_loss_weight * full_loss
+
                         # Compute instance loss
-                        loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                        logs["inst_loss"] = loss.detach().item()
+                        loss_inst = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                        logs["l_inst"] = loss_inst.detach().item()
+                        loss += loss_inst
+
+                        # Compute full instance loss
+                        loss_inst_full = F.mse_loss(
+                            model_pred_full.float(), target_full.float(), reduction="mean"
+                        )
+                        logs["l_inst_F"] = loss_inst_full.detach().item()
+                        loss += loss_inst_full
 
                         # Compute prior loss
                         prior_loss = F.mse_loss(
@@ -1327,14 +1436,15 @@ class SpatialDreambooth:
                         )
 
                         # Add the prior loss to the instance loss.
-                        logs["prior_loss"] = prior_loss.detach().item()
-                        loss = loss + self.args.prior_loss_weight * prior_loss
+                        logs["l_prior"] = prior_loss.detach().item()
+                        loss += self.args.prior_loss_weight * prior_loss
                     else:
                         if self.args.apply_masked_loss:
                             max_masks = torch.max(batch["instance_masks"], axis=1).values
                             downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
                             model_pred = model_pred * downsampled_mask
                             target = target * downsampled_mask
+
                         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                     # Attention loss
@@ -1352,7 +1462,7 @@ class SpatialDreambooth:
                                 select=batch_idx,
                             )
 
-                            curr_cond_batch_idx = self.args.train_batch_size + batch_idx
+                            curr_cond_batch_idx = 2 * self.args.train_batch_size + batch_idx
 
                             valid_masks_num = len(GT_masks.sum(dim=(2, 3)).flatten().nonzero())
 
@@ -1365,18 +1475,21 @@ class SpatialDreambooth:
                                     curr_placeholder_token_id
                                 ).nonzero().item())
 
-                                asset_attn_mask = agg_attn[..., asset_idx]
-                                asset_attn_mask = (asset_attn_mask / asset_attn_mask.max())
-                                attn_loss += F.mse_loss(
-                                    GT_masks[mask_id, 0].float(),
-                                    asset_attn_mask.float(),
-                                    reduction="mean",
-                                )
+                                # <asset>
+                                for offset in range(2):
+                                    asset_attn_mask = agg_attn[..., asset_idx + offset]
+                                    asset_attn_mask = (asset_attn_mask / asset_attn_mask.max())
+
+                                    attn_loss += F.mse_loss(
+                                        GT_masks[mask_id, 0].float(),
+                                        asset_attn_mask.float(),
+                                        reduction="mean",
+                                    )
 
                         attn_loss = self.args.lambda_attention * (
                             attn_loss / self.args.train_batch_size
                         )
-                        logs["attn_loss"] = attn_loss.detach().item()
+                        logs["l_attn"] = attn_loss.detach().item()
                         loss += attn_loss
 
                     self.accelerator.backward(loss)
@@ -1424,22 +1537,25 @@ class SpatialDreambooth:
                                                           (last_sentence != 49406) &
                                                           (last_sentence != 49407)]
                             last_sentence = self.tokenizer.decode(last_sentence)
+
                             self.save_cross_attention_vis(
                                 last_sentence,
+                                batch_pixels=batch["pixel_values"]
+                                [curr_cond_batch_idx].detach().cpu(),
                                 attention_maps=agg_attn.detach().cpu(),
                                 path=os.path.join(img_logs_path, f"{global_step:05}_step_attn.jpg"),
                             )
+
                         self.controller.cur_step = 0
                         self.controller.attention_store = {}
 
-                        self.perform_full_inference(
-                            path=os.path.join(img_logs_path, f"{global_step:05}_full_pred.jpg")
-                        )
+                        full_rgb = self.perform_full_inference()
                         full_agg_attn = self.aggregate_attention(
                             res=16, from_where=("up", "down"), is_cross=True, select=0
                         )
                         self.save_cross_attention_vis(
                             self.args.instance_prompt,
+                            batch_pixels=full_rgb,
                             attention_maps=full_agg_attn.detach().cpu(),
                             path=os.path.join(img_logs_path, f"{global_step:05}_full_attn.jpg"),
                         )
@@ -1459,7 +1575,7 @@ class SpatialDreambooth:
 
     def save_adaptor(self, step=""):
 
-        if self.args.use_boft:
+        if self.args.use_peft != "none":
 
             unwarpped_unet = self.accelerator.unwrap_model(self.unet)
             unwarpped_unet.save_pretrained(
@@ -1538,7 +1654,7 @@ class SpatialDreambooth:
         return out
 
     @torch.no_grad()
-    def perform_full_inference(self, path, guidance_scale=7.5):
+    def perform_full_inference(self, guidance_scale=7.5):
         self.unet.eval()
         self.text_encoder.eval()
 
@@ -1585,20 +1701,35 @@ class SpatialDreambooth:
         if self.args.train_text_encoder:
             self.text_encoder.train()
 
-        Image.fromarray(images[0]).save(path)
+        return Image.fromarray(images[0])
 
     @torch.no_grad()
-    def save_cross_attention_vis(self, prompt, attention_maps, path):
+    def save_cross_attention_vis(self, prompt, batch_pixels, attention_maps, path):
+
         tokens = self.tokenizer.encode(prompt)
         images = []
-        for i in range(len(tokens)):
-            image = attention_maps[:, :, i]
-            image = 255 * image / image.max()
-            image = image.unsqueeze(-1).expand(*image.shape, 3)
-            image = image.numpy().astype(np.uint8)
+
+        if torch.is_tensor(batch_pixels):
+            image = batch_pixels.permute(1, 2, 0).numpy()
+            image = ((image + 1.0) * 0.5 * 255).round().astype("uint8")
             image = np.array(Image.fromarray(image).resize((256, 256)))
-            image = ptp_utils.text_under_image(image, self.tokenizer.decode(int(tokens[i])))
-            images.append(image)
+        elif isinstance(batch_pixels, Image.Image):
+            image = np.array(batch_pixels.resize((256, 256)))
+
+        image = ptp_utils.text_under_image(image, "raw pixels")
+        images.append(image)
+
+        for i in range(len(tokens)):
+            asset_word = self.tokenizer.decode(int(tokens[i]))
+            if ("asset" in asset_word) or (asset_word in self.gpt4v_response.keys()):
+                image = attention_maps[:, :, i]
+                image = 255 * image / image.max()
+                image = image.unsqueeze(-1).expand(*image.shape, 3)
+                image = image.numpy().astype(np.uint8)
+                image = np.array(Image.fromarray(image).resize((256, 256)))
+                image = ptp_utils.text_under_image(image, asset_word)
+                images.append(image)
+
         vis = ptp_utils.view_images(np.stack(images, axis=0))
         vis.save(path)
 
@@ -1611,7 +1742,7 @@ class P2PCrossAttnProcessor:
 
     def __call__(
         self,
-        attn: CrossAttention,
+        attn: Attention,
         hidden_states,
         encoder_hidden_states=None,
         attention_mask=None,

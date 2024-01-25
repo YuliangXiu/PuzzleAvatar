@@ -108,9 +108,9 @@ def gpt4v_captioning(img_dir):
         f"Bearer {os.environ['OPENAI_API_KEY']}"
     }
 
-    used_lst = os.listdir(img_dir)
-    if len(used_lst) > 20:
-        used_lst = used_lst[:20]
+    used_lst = sorted(os.listdir(img_dir))
+    if len(used_lst) > 5:
+        used_lst = used_lst[:5]
 
     images = [encode_image(os.path.join(img_dir, img_name)) for img_name in used_lst]
     prompt = open("./multi_concepts/gpt4v_prompt.txt", "r").read()
@@ -133,6 +133,18 @@ def gpt4v_captioning(img_dir):
     result = response.json()['choices'][0]['message']['content']
 
     return result
+
+
+def face_asset_combine(mask, mask_final, CLASSES, labels):
+
+    for label in labels:
+        if label in CLASSES and CLASSES.index(label) in mask_final.keys():
+            mask = ndimage.binary_dilation(
+                np.logical_or(mask, mask_final[CLASSES.index(label)]),
+                structure=struct,
+                iterations=3
+            ).astype(np.uint8) * 255
+    return mask
 
 
 if __name__ == '__main__':
@@ -174,21 +186,28 @@ if __name__ == '__main__':
     BOX_TRESHOLD = 0.30
     TEXT_TRESHOLD = 0.25
 
-    json_path = f"{opt.out_dir}/gpt4v_response.json"
-    if not os.path.exists(json_path):
-        gpt4v_response = gpt4v_captioning(os.path.join(opt.in_dir, "image"))
-        with open(json_path, "w") as f:
-            f.write(gpt4v_response)
-    else:
-        with open(json_path, "r") as f:
-            gpt4v_response = f.read()
+    try:
+        json_path = f"{opt.out_dir}/gpt4v_response.json"
+        if not os.path.exists(json_path):
+            gpt4v_response = gpt4v_captioning(os.path.join(opt.in_dir, "image"))
+            with open(json_path, "w") as f:
+                f.write(gpt4v_response)
+        else:
+            with open(json_path, "r") as f:
+                gpt4v_response = f.read()
 
-    print(gpt4v_response)
+        print(gpt4v_response)
 
-    CLASSES = [item.strip() for item in json.loads(gpt4v_response).keys() if item != 'gender']
-    CLASSES = ["person"] + CLASSES
+        CLASSES = [item.strip() for item in json.loads(gpt4v_response).keys() if item != 'gender']
+        CLASSES = ["person"] + CLASSES
 
-    print(CLASSES)
+        print(CLASSES)
+
+    except:
+        with open("./clusters/error.txt", "a") as f:
+            f.write(f"{opt.in_dir[5:]} {' '.join(opt.in_dir.split('/')[-2:])}\n")
+        os.remove(f"{opt.in_dir}/gpt4v_response.json")
+        sys.exit()
 
     for img_name in tqdm(os.listdir(opt.in_dir + "/image")):
 
@@ -237,31 +256,22 @@ if __name__ == '__main__':
             # remove the overlapping area
             for cls_id, mask in mask_final.items():
 
-                if cls_id != CLASSES.index("face"):
+                if "face" in CLASSES and cls_id == CLASSES.index("face"):
+                    struct = np.ones((3, 3))
+
+                    mask = face_asset_combine(
+                        mask, mask_final, CLASSES, ["haircut", "hair", "eyeglasses", "glasses"]
+                    )
+
+                    mask_final[cls_id] = mask
+
+                else:
                     mask_other = np.zeros_like(mask)
                     other_cls_ids = list(mask_final.keys())
                     other_cls_ids.remove(cls_id)
                     for other_cls_id in other_cls_ids:
                         mask_other += mask_final[other_cls_id]
                     mask_final[cls_id] = mask * (mask_other == 0)
-                else:
-                    struct = np.ones((3, 3))
-
-                    if "eyeglasses" in CLASSES and CLASSES.index("eyeglasses") in mask_final.keys():
-                        mask = ndimage.binary_dilation(
-                            np.logical_or(mask, mask_final[CLASSES.index("eyeglasses")]),
-                            structure=struct,
-                            iterations=3
-                        ).astype(np.uint8) * 255
-
-                    if "haircut" in CLASSES and CLASSES.index("haircut") in mask_final.keys():
-                        mask = ndimage.binary_erosion(
-                            np.logical_and(mask, 1.0 - mask_final[CLASSES.index("haircut")]),
-                            structure=struct,
-                            iterations=3
-                        ).astype(np.uint8) * 255
-
-                    mask_final[cls_id] = mask
 
                 if (mask_final[cls_id] / 255.0).sum() > 500:
                     if CLASSES[cls_id] != "eyeglasses":

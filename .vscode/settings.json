@@ -49,11 +49,19 @@
             "group": "Default"
         },
         {
-            "filePath": "logs/03594/outfit03",
+            "filePath": "data/PuzzleIOI/puzzle/03594/outfit03",
             "group": "Default"
         },
         {
-            "filePath": "data/PuzzleIOI/puzzle/03594/outfit03",
+            "filePath": "logs/03594/outfit01",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/03595/outfit13",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/human/yuliang/train_multi_concepts.err",
             "group": "Default"
         }
     ]
