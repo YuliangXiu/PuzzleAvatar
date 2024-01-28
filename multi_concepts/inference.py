@@ -123,7 +123,7 @@ class BreakASceneInference:
         if is_xformers_available():
             self.pipeline.unet.enable_xformers_memory_efficient_attention()
 
-        # self.pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+        self.pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
         self.pipeline.to(self.args.device)
 
     @torch.no_grad()

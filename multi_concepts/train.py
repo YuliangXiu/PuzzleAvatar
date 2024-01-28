@@ -66,8 +66,8 @@ check_min_version("0.12.0")
 
 logger = get_logger(__name__)
 
-UNET_TARGET_MODULES = ["to_q", "to_v", "to_k", "proj_in", "proj_out"]
-TEXT_ENCODER_TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj"]
+UNET_TARGET_MODULES = ["to_q", "to_v", "to_k", "proj_in", "proj_out", "to_out.0", "add_k_proj", "add_v_proj"]
+TEXT_ENCODER_TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj", "out_proj"]
 
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
@@ -1261,6 +1261,8 @@ class SpatialDreambooth:
 
                             unet_config = LoraConfig(
                                 r=self.args.lora_r,
+                                lora_alpha=self.args.lora_r,
+                                init_lora_weights="gaussian",
                                 target_modules=UNET_TARGET_MODULES,
                                 lora_dropout=self.args.boft_dropout,
                                 bias="lora_only"
@@ -1289,6 +1291,8 @@ class SpatialDreambooth:
                             elif self.args.use_peft == "lora":
                                 text_config = LoraConfig(
                                     r=self.args.lora_r,
+                                    lora_alpha=self.args.lora_r,
+                                    init_lora_weights="gaussian",
                                     target_modules=TEXT_ENCODER_TARGET_MODULES,
                                     lora_dropout=self.args.boft_dropout,
                                     bias="lora_only"
@@ -1392,13 +1396,19 @@ class SpatialDreambooth:
 
                         if self.args.apply_masked_loss:
                             max_masks = torch.max(batch["instance_masks"], axis=1).values
-                            full_masks = batch["full_masks"]
+                            
+                            # weighted the loss by the ratio of masked pixels
+                            mask_ratio = max_masks.sum() / max_masks.numel()
+                            mask_ratio = 1.0 / (1.0 + 3.0 * torch.exp(-5.0 * mask_ratio))
+                            # mask_ratio = 1.0
+                            
+                            # full_masks = batch["full_masks"]
                             downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
-                            downsampled_full_mask = F.interpolate(input=full_masks, size=(64, 64))
+                            # downsampled_full_mask = F.interpolate(input=full_masks, size=(64, 64))
 
-                            # full masked
-                            model_pred_full = model_pred * downsampled_full_mask
-                            target_full = target * downsampled_full_mask
+                            # # full masked
+                            # model_pred_full = model_pred * downsampled_full_mask
+                            # target_full = target * downsampled_full_mask
 
                             # partial masked
                             model_pred = model_pred * downsampled_mask
@@ -1418,15 +1428,15 @@ class SpatialDreambooth:
 
                         # Compute instance loss
                         loss_inst = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                        logs["l_inst"] = loss_inst.detach().item()
+                        logs["l_inst"] = (loss_inst / mask_ratio).detach().item()
                         loss += loss_inst
 
-                        # Compute full instance loss
-                        loss_inst_full = F.mse_loss(
-                            model_pred_full.float(), target_full.float(), reduction="mean"
-                        )
-                        logs["l_inst_F"] = loss_inst_full.detach().item()
-                        loss += loss_inst_full
+                        # # Compute full instance loss (harm the decomposition)
+                        # loss_inst_full = F.mse_loss(
+                        #     model_pred_full.float(), target_full.float(), reduction="mean"
+                        # )
+                        # logs["l_inst_F"] = loss_inst_full.detach().item()
+                        # loss += loss_inst_full
 
                         # Compute prior loss
                         prior_loss = F.mse_loss(
@@ -1488,7 +1498,7 @@ class SpatialDreambooth:
 
                         attn_loss = self.args.lambda_attention * (
                             attn_loss / self.args.train_batch_size
-                        )
+                        ) / mask_ratio
                         logs["l_attn"] = attn_loss.detach().item()
                         loss += attn_loss
 

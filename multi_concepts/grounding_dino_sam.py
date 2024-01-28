@@ -131,6 +131,9 @@ def gpt4v_captioning(img_dir):
     )
 
     result = response.json()['choices'][0]['message']['content']
+    
+    if "face" not in result.keys():
+        result["face"] = ""
 
     return result
 
@@ -259,8 +262,11 @@ if __name__ == '__main__':
                 if "face" in CLASSES and cls_id == CLASSES.index("face"):
                     struct = np.ones((3, 3))
 
+                    # mask = face_asset_combine(
+                    #     mask, mask_final, CLASSES, ["haircut", "hair", "eyeglasses", "glasses"]
+                    # )
                     mask = face_asset_combine(
-                        mask, mask_final, CLASSES, ["haircut", "hair", "eyeglasses", "glasses"]
+                        mask, mask_final, CLASSES, ["eyeglasses", "glasses"]
                     )
 
                     mask_final[cls_id] = mask

@@ -1282,7 +1282,6 @@ class SMPLX(SMPLH):
             right_hand_pose = torch.einsum(
                 "bi,ij->bj", [right_hand_pose, self.right_hand_components]
             )
-
         full_pose = torch.cat(
             [
                 global_orient,
@@ -1303,12 +1302,16 @@ class SMPLX(SMPLH):
             body_pose[:, 15] = torch.tensor([0., 0., -45 * np.pi / 180.])
             body_pose[:, 16] = torch.tensor([0., 0., 45 * np.pi / 180.])
             body_pose = body_pose.view(body_pose.shape[0], -1)
+            
+            # open mouth
+            jaw_pose = jaw_pose * 0.
+            jaw_pose[..., 0] = np.pi / 18
 
             full_pose = torch.cat(
                 [
                     global_orient * 0.,
                     body_pose,
-                    jaw_pose * 0.,
+                    jaw_pose,
                     leye_pose * 0.,
                     reye_pose * 0.,
                     left_hand_pose * 0.,
@@ -1321,26 +1324,11 @@ class SMPLX(SMPLH):
             body_pose[:, 0] = torch.tensor([0., 0., 30 * np.pi / 180.])
             body_pose[:, 1] = torch.tensor([0., 0., -30 * np.pi / 180.])
             body_pose = body_pose.view(body_pose.shape[0], -1)
-
-            full_pose = torch.cat(
-                [
-                    global_orient * 0.,
-                    body_pose,
-                    jaw_pose * 0.,
-                    leye_pose * 0.,
-                    reye_pose * 0.,
-                    left_hand_pose * 0.,
-                    right_hand_pose * 0.,
-                ],
-                dim=1,
-            )
-        elif pose_type == "da-pose-openmouth":
-            body_pose = torch.zeros_like(body_pose).view(body_pose.shape[0], -1, 3)
-            body_pose[:, 0] = torch.tensor([0., 0., 30 * np.pi / 180.])
-            body_pose[:, 1] = torch.tensor([0., 0., -30 * np.pi / 180.])
-            body_pose = body_pose.view(body_pose.shape[0], -1)
+            
+            # open mouth
             jaw_pose = jaw_pose * 0.
             jaw_pose[..., 0] = np.pi / 18
+
             full_pose = torch.cat(
                 [
                     global_orient * 0.,

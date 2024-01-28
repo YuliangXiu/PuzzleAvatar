@@ -49,10 +49,6 @@
             "group": "Default"
         },
         {
-            "filePath": "data/PuzzleIOI/puzzle/03594/outfit03",
-            "group": "Default"
-        },
-        {
             "filePath": "logs/03594/outfit01",
             "group": "Default"
         },
@@ -62,6 +58,22 @@
         },
         {
             "filePath": "logs/human/yuliang/train_multi_concepts.err",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/human/yuliang/train_geometry.err",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/human/yuliang/geometry/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/human/yuliang/texture/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "data/PuzzleIOI/puzzle/03594/outfit01",
             "group": "Default"
         }
     ]

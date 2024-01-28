@@ -43,7 +43,7 @@ def dict_to_prompt(d):
     prompt += "wearing " + " , ".join([
         f"<asset{keys.index(key)}> {d[key]} {key}" for key in keys if key not in with_classes
     ]) + "."
-    
+
     placeholders = []
     for key in keys:
         placeholders.append(f"<asset{keys.index(key)}>")
@@ -100,20 +100,52 @@ if __name__ == '__main__':
             gender=gender,
             age="adult",
             use_face_contour=False,
-            use_pca=False,
-            num_betas=200,
-            num_expression_coeffs=50,
+            use_pca=True,
+            num_betas=10,
+            num_expression_coeffs=10,
             flat_hand_mean=True,
             ext='pkl'
         )
 
-        smplx_obj = smplx_model(
-            return_verts=True,
-            return_full_pose=True,
-            return_joint_transformation=True,
-            return_vertex_transformation=True,
-            pose_type="a-pose"
-        )
+        if "outfit" in cfg.sub_name:
+
+            smpl_param_path = os.path.join(
+                opt.exp_dir.replace("results", "data").replace("puzzle", "fitting"),
+                "output/smplx/smpl/000000.json"
+            )
+
+            smpl_param = json.load(open(smpl_param_path, "r"))[0]
+
+            for key in smpl_param.keys():
+                smpl_param[key] = torch.as_tensor(np.array(smpl_param[key])).float()
+
+            NUM_JOINTS = 21
+
+            smplx_obj = smplx_model(
+                betas=smpl_param['shapes'],
+                global_orient=smpl_param['poses'][:, :3],
+                body_pose=smpl_param["poses"][:, 3:(NUM_JOINTS + 1) * 3],
+                expression=smpl_param['expression'],
+                jaw_pose=smpl_param['poses'][:, (NUM_JOINTS + 1) * 3:(NUM_JOINTS + 2) * 3],
+                leye_pose=smpl_param['poses'][:, (NUM_JOINTS + 2) * 3:(NUM_JOINTS + 3) * 3],
+                reye_pose=smpl_param['poses'][:, (NUM_JOINTS + 3) * 3:(NUM_JOINTS + 4) * 3],
+                left_hand_pose=smpl_param['poses'][:, (NUM_JOINTS + 4) * 3:(NUM_JOINTS + 6) * 3],
+                right_hand_pose=smpl_param['poses'][:, (NUM_JOINTS + 6) * 3:],
+                return_verts=True,
+                return_full_pose=True,
+                return_joint_transformation=True,
+                return_vertex_transformation=True,
+            )
+
+        else:
+
+            smplx_obj = smplx_model(
+                return_verts=True,
+                return_full_pose=True,
+                return_joint_transformation=True,
+                return_vertex_transformation=True,
+                pose_type="a-pose"
+            )
 
         smplx_verts = smplx_obj.vertices.detach()[0].numpy()
         smplx_joints = smplx_obj.joints.detach()[0].numpy()
@@ -122,7 +154,7 @@ if __name__ == '__main__':
         smplx_joints[:, 1] -= pelvis_y
         smplx_faces = smplx_model.faces
         trimesh.Trimesh(smplx_verts, smplx_faces).export(smplx_path)
-        np.save(keypoint_path, {"joints": torch.tensor(smplx_joints)}, allow_pickle=True)
+        np.save(keypoint_path, {"joints": smplx_joints, "pelvis_y": pelvis_y}, allow_pickle=True)
 
     seed_everything(opt.seed)
     model = Renderer(cfg)
