@@ -43,7 +43,9 @@ class BreakASceneInference:
         with open(os.path.join(self.args.instance_dir, 'gpt4v_response.json'), 'r') as f:
             gpt4v_response = json.load(f)
             self.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
+
             self.classes = list(gpt4v_response.keys())
+
             self.classes.remove("gender")
             for key in ["eyeglasses", "sunglasses", "glasses"]:
                 if key in self.classes:
@@ -90,10 +92,6 @@ class BreakASceneInference:
                 requires_safety_checker=False,
             )
 
-            num_added_tokens = self.pipeline.tokenizer.add_tokens(self.placeholder_tokens)
-            print(f"Added {num_added_tokens} tokens")
-            self.pipeline.text_encoder.resize_token_embeddings(len(self.pipeline.tokenizer))
-
             self.pipeline.scheduler = DDPMScheduler.from_pretrained(
                 self.args.pretrained_model_name_or_path, subfolder="scheduler"
             )
@@ -109,8 +107,6 @@ class BreakASceneInference:
                 os.path.join(self.args.model_dir, "unet", self.args.step),
                 adapter_name=person_id,
             )
-            self.pipeline.text_encoder.eval()
-            self.pipeline.unet.eval()
 
         else:
 
@@ -120,16 +116,29 @@ class BreakASceneInference:
                 requires_safety_checker=False,
             )
 
+        num_added_tokens = self.pipeline.tokenizer.add_tokens(self.placeholder_tokens)
+        print(f"Added {num_added_tokens} tokens")
+        self.pipeline.text_encoder.resize_token_embeddings(len(self.pipeline.tokenizer))
+
         if is_xformers_available():
             self.pipeline.unet.enable_xformers_memory_efficient_attention()
 
         self.pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+        self.pipeline.text_encoder.eval()
+        self.pipeline.unet.eval()
         self.pipeline.to(self.args.device)
 
     @torch.no_grad()
     def infer_and_save(self, prompts, tokens):
 
-        images = self.pipeline(prompts, guidance_scale=7.5, num_inference_steps=30).images
+        negative_prompt = 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy, shadow, worst quality, jpeg artifacts, poorly drawn, dehydrated, noisy, poorly drawn, bad proportions, bad anatomy, bad lighting, bad composition, bad framing, fused fingers, noisy'
+
+        images = self.pipeline(
+            prompts,
+            negative_prompt=[negative_prompt] * len(prompts),
+            guidance_scale=7.5,
+            num_inference_steps=30
+        ).images
 
         if not os.path.exists(self.args.output_dir):
             os.makedirs(self.args.output_dir, exist_ok=True)
@@ -144,7 +153,10 @@ if __name__ == "__main__":
 
     prompts = []
     tokens = []
-    with_ids = [break_a_scene_inference.classes.index(cls) for cls in ['face', 'haircut']]
+    with_ids = []
+    for cls in ['face', 'haircut', 'hair']:
+        if cls in break_a_scene_inference.classes:
+            with_ids.append(break_a_scene_inference.classes.index(cls))
 
     for i in range(break_a_scene_inference.args.num_samples):
         num_of_tokens = random.randrange(1, len(break_a_scene_inference.classes) + 1)

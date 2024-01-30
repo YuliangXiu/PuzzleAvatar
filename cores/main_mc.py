@@ -29,7 +29,10 @@ def dict_to_prompt(d):
     keys = list(d.keys())
     gender = "man" if d['gender'] == "male" else "woman"
     keys.remove("gender")
-    keys.remove("eyeglasses")
+
+    for key in ["eyeglasses", "sunglasses", "glasses"]:
+        if key in keys:
+            keys.remove(key)
 
     prompt += f" a {gender}, "
     with_classes = ['face', 'haircut']
@@ -60,6 +63,7 @@ if __name__ == '__main__':
     parser.add_argument('--exp_dir', type=str, required=True, help="experiment dir")
     parser.add_argument('--sub_name', type=str, required=True, help="subject name")
     parser.add_argument('--seed', type=int, default=42, help="random seed")
+    parser.add_argument('--use_peft', type=str, default="none", help="none/lora/boft")
     parser.add_argument('--test', action="store_true")
 
     opt = parser.parse_args()
@@ -69,6 +73,7 @@ if __name__ == '__main__':
     cfg.workspace = os.path.join(opt.exp_dir, cfg.stage)
     cfg.exp_root = opt.exp_dir
     cfg.sub_name = opt.sub_name
+    cfg.use_peft = opt.use_peft
 
     if cfg.guidance.use_dreambooth:
         cfg.guidance.hf_key = opt.exp_dir
@@ -208,6 +213,7 @@ if __name__ == '__main__':
             guidance = StableDiffusion(
                 device,
                 placeholders,
+                cfg.use_peft,
                 cfg.guidance.sd_version,
                 cfg.guidance.hf_key,
                 cfg.guidance.step_range,

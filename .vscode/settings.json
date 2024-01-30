@@ -75,6 +75,14 @@
         {
             "filePath": "data/PuzzleIOI/puzzle/03594/outfit01",
             "group": "Default"
+        },
+        {
+            "filePath": "logs/human/yuliang/test_multi_concepts.err",
+            "group": "Default"
+        },
+        {
+            "filePath": "data/PuzzleIOI/puzzle/03595/outfit13",
+            "group": "Default"
         }
     ]
 }

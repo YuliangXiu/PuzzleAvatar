@@ -1,8 +1,5 @@
 from diffusers import (
-    AutoencoderKL,
-    ControlNetModel,
-    DDIMScheduler,
-    UNet2DConditionModel,
+    AutoencoderKL, ControlNetModel, DDIMScheduler, UNet2DConditionModel, DiffusionPipeline
 )
 from transformers import CLIPTextModel, CLIPTokenizer, logging
 
@@ -47,6 +44,7 @@ class StableDiffusion(nn.Module):
         self,
         device,
         placeholders,
+        use_peft,
         sd_version='2-1',
         hf_key=None,
         sd_step_range=[0.2, 0.98],
@@ -60,6 +58,7 @@ class StableDiffusion(nn.Module):
         self.device = device
         self.sd_version = sd_version
         self.placeholders = placeholders
+        self.use_peft = use_peft
 
         print(f'[INFO] loading stable diffusion...')
 
@@ -76,25 +75,33 @@ class StableDiffusion(nn.Module):
         else:
             raise ValueError(f'Stable-diffusion version {self.sd_version} not supported.')
 
-        # Create model
-        self.vae = AutoencoderKL.from_pretrained(base_model_key, subfolder="vae").to(self.device)
-        self.tokenizer = CLIPTokenizer.from_pretrained(base_model_key, subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained(base_model_key,
-                                                          subfolder="text_encoder").to(self.device)
-        self.unet = UNet2DConditionModel.from_pretrained(base_model_key,
-                                                         subfolder="unet").to(self.device)
+        if self.use_peft != 'none':
 
-        # BOFT adapters loading
+            # Create model
+            self.vae = AutoencoderKL.from_pretrained(base_model_key,
+                                                     subfolder="vae").to(self.device)
+            self.tokenizer = CLIPTokenizer.from_pretrained(base_model_key, subfolder="tokenizer")
+
+            from peft import PeftModel
+            self.text_encoder = PeftModel.from_pretrained(
+                self.text_encoder, join(model_key, 'text_encoder')
+            )
+            self.unet = PeftModel.from_pretrained(self.unet, join(model_key, 'unet'))
+
+        else:
+            pipe = DiffusionPipeline.from_pretrained(
+                model_key,
+                torch_dtype=torch.float32,
+                requires_safety_checker=False,
+            ).to(self.device)
+            self.tokenizer = pipe.tokenizer
+            self.text_encoder = pipe.text_encoder
+            self.unet = pipe.unet
+            self.vae = pipe.vae
 
         num_added_tokens = self.tokenizer.add_tokens(self.placeholders)
         print(f"Added {num_added_tokens} tokens")
         self.text_encoder.resize_token_embeddings(len(self.tokenizer))
-
-        from peft import PeftModel
-        self.text_encoder = PeftModel.from_pretrained(
-            self.text_encoder, join(model_key, 'text_encoder')
-        )
-        self.unet = PeftModel.from_pretrained(self.unet, join(model_key, 'unet'))
 
         # enable FreeU
         self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)

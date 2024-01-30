@@ -66,7 +66,9 @@ check_min_version("0.12.0")
 
 logger = get_logger(__name__)
 
-UNET_TARGET_MODULES = ["to_q", "to_v", "to_k", "proj_in", "proj_out", "to_out.0", "add_k_proj", "add_v_proj"]
+UNET_TARGET_MODULES = [
+    "to_q", "to_v", "to_k", "proj_in", "proj_out", "to_out.0", "add_k_proj", "add_v_proj"
+]
 TEXT_ENCODER_TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj", "out_proj"]
 
 
@@ -570,36 +572,40 @@ class DreamBoothDataset(Dataset):
         self.num_class_images = num_class_images
 
         instance_img_paths = sorted(glob.glob(f"{instance_data_root}/image/*"))
-        self._length = max(len(instance_img_paths), self.num_class_images)
 
-        self.instance_images = [
-            self.image_transforms(Image.open(path))[:3] for path in instance_img_paths
-        ]
+        self.instance_images = []
         self.instance_masks = []
         self.instance_descriptions = []
 
-        for i in range(len(instance_img_paths)):
-            instance_mask_paths = glob.glob(f"{instance_data_root}/mask/{i:02d}_*.png")
-            instance_mask = []
-            instance_placeholder_token = []
-            instance_class_tokens = []
-            instance_description = []
+        for instance_img_path in instance_img_paths:
+            instance_idx = instance_img_path.split("/")[-1].split(".")[0]
+            instance_mask_paths = glob.glob(f"{instance_data_root}/mask/{instance_idx}_*.png")
 
-            for instance_mask_path in instance_mask_paths:
-                curr_mask = Image.open(instance_mask_path)
-                curr_mask = self.mask_transforms(curr_mask)[0, None, None, ...]
-                instance_mask.append(curr_mask)
-                curr_token = instance_mask_path.split(".")[0].split("_")[-1]
-                instance_placeholder_token.append(
-                    self.placeholder_full[self.initializer_tokens.index(curr_token)]
+            if len(instance_mask_paths) > 0:
+
+                self.instance_images.append(
+                    self.image_transforms(Image.open(instance_img_path))[:3]
                 )
-                instance_class_tokens.append(curr_token)
-                instance_description.append(self.gpt4v_response[curr_token])
+                instance_mask = []
+                instance_placeholder_token = []
+                instance_class_tokens = []
+                instance_description = []
 
-            self.instance_masks.append(torch.cat(instance_mask))
-            self.placeholder_tokens.append(instance_placeholder_token)
-            self.class_tokens.append(instance_class_tokens)
-            self.instance_descriptions.append(instance_description)
+                for instance_mask_path in instance_mask_paths:
+                    curr_mask = Image.open(instance_mask_path)
+                    curr_mask = self.mask_transforms(curr_mask)[0, None, None, ...]
+                    instance_mask.append(curr_mask)
+                    curr_token = instance_mask_path.split(".")[0].split("_")[-1]
+                    instance_placeholder_token.append(
+                        self.placeholder_full[self.initializer_tokens.index(curr_token)]
+                    )
+                    instance_class_tokens.append(curr_token)
+                    instance_description.append(self.gpt4v_response[curr_token])
+
+                self.instance_masks.append(torch.cat(instance_mask))
+                self.placeholder_tokens.append(instance_placeholder_token)
+                self.class_tokens.append(instance_class_tokens)
+                self.instance_descriptions.append(instance_description)
 
         self.class_images_path = {}
         if self.class_data_root is not None:
@@ -608,6 +614,8 @@ class DreamBoothDataset(Dataset):
                 self.class_images_path[class_name] = list(class_data_dir.iterdir())
         else:
             self.class_data_root = None
+
+        self._length = max(len(self.instance_images), self.num_class_images)
 
     def __len__(self):
 
@@ -882,7 +890,7 @@ class SpatialDreambooth:
                 safety_checker=None,
                 revision=self.args.revision,
             )
-            # pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+            pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
             pipeline.set_progress_bar_config(disable=True)
             pipeline.to(self.accelerator.device)
 
@@ -927,7 +935,13 @@ class SpatialDreambooth:
                         desc=f"Generating {class_name} images",
                         disable=not self.accelerator.is_local_main_process,
                     ):
-                        images = pipeline(example["prompt"]).images
+
+                        negative_prompt = 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy, shadow, worst quality, jpeg artifacts, poorly drawn, dehydrated, noisy, poorly drawn, bad proportions, bad anatomy, bad lighting, bad composition, bad framing, fused fingers, noisy'
+
+                        images = pipeline(
+                            example["prompt"],
+                            negative_prompt=[negative_prompt] * len(example["prompt"])
+                        ).images
 
                         for i, image in enumerate(images):
                             hash_image = hashlib.sha1(image.tobytes()).hexdigest()
@@ -1396,15 +1410,22 @@ class SpatialDreambooth:
 
                         if self.args.apply_masked_loss:
                             max_masks = torch.max(batch["instance_masks"], axis=1).values
-                            
+
                             # weighted the loss by the ratio of masked pixels
                             mask_ratio = max_masks.sum() / max_masks.numel()
                             mask_ratio = 1.0 / (1.0 + 3.0 * torch.exp(-5.0 * mask_ratio))
-                            # mask_ratio = 1.0
-                            
-                            # full_masks = batch["full_masks"]
+
+                            # [1,1,64,64]
                             downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
-                            # downsampled_full_mask = F.interpolate(input=full_masks, size=(64, 64))
+
+                            # with background
+                            full_masks = batch["full_masks"]
+                            downsampled_full_mask = F.interpolate(input=full_masks, size=(64, 64))
+                            downsampled_mask = torch.max(
+                                torch.cat([downsampled_mask, 1.0 - downsampled_full_mask]),
+                                dim=1,
+                                keepdims=True
+                            ).values
 
                             # # full masked
                             # model_pred_full = model_pred * downsampled_full_mask
