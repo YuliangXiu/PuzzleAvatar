@@ -24,10 +24,8 @@ def enhance_class_name(class_names: List[str]) -> List[str]:
 
     new_class_names = []
     for class_name in class_names:
-        if class_name == 'haircut':
-            new_class_names.append('all haircuts hair')
-        elif class_name == 'face':
-            new_class_names.append('all facial face')
+        if class_name == 'face':
+            new_class_names.append('face')
         else:
             new_class_names.append(f"all {class_name}")
 
@@ -131,22 +129,32 @@ def gpt4v_captioning(img_dir):
     )
 
     result = response.json()['choices'][0]['message']['content']
-    
+
     if "face" not in result.keys():
         result["face"] = ""
 
     return result
 
 
-def face_asset_combine(mask, mask_final, CLASSES, labels):
+def face_asset_combine(mask, mask_final, CLASSES, struct, labels_add, labels_remove):
 
-    for label in labels:
+    for label in labels_add:
         if label in CLASSES and CLASSES.index(label) in mask_final.keys():
             mask = ndimage.binary_dilation(
                 np.logical_or(mask, mask_final[CLASSES.index(label)]),
                 structure=struct,
                 iterations=3
-            ).astype(np.uint8) * 255
+            )
+            print(f"add {label} {mask_final.keys()}")
+    for label in labels_remove:
+        if label in CLASSES and CLASSES.index(label) in mask_final.keys():
+            mask = ndimage.binary_erosion(
+                np.logical_and(mask, 1.0 - mask_final[CLASSES.index(label)]),
+                structure=struct,
+                iterations=3
+            )
+            print(f"remove {label} {mask_final.keys()}")
+
     return mask
 
 
@@ -187,7 +195,7 @@ if __name__ == '__main__':
     sam_predictor = SamPredictor(sam)
 
     BOX_TRESHOLD = 0.30
-    TEXT_TRESHOLD = 0.25
+    TEXT_TRESHOLD = 0.40
 
     try:
         json_path = f"{opt.out_dir}/gpt4v_response.json"
@@ -237,6 +245,8 @@ if __name__ == '__main__':
         )
 
         mask_dict = {}
+        
+        print(img_name, detections.class_id, CLASSES)
 
         # if there is person in the image
         if 0 in detections.class_id:
@@ -252,21 +262,21 @@ if __name__ == '__main__':
 
             # stack all the masks of the same class together within the same image
             for cls_id, masks in mask_dict.items():
-                mask = np.stack(masks).sum(axis=0)
-                mask = (mask > 0).astype(np.uint8) * 255
+                mask = np.stack(masks).sum(axis=0) > 0
                 mask_final[cls_id] = mask
 
             # remove the overlapping area
             for cls_id, mask in mask_final.items():
-
+                
                 if "face" in CLASSES and cls_id == CLASSES.index("face"):
-                    struct = np.ones((3, 3))
 
-                    # mask = face_asset_combine(
-                    #     mask, mask_final, CLASSES, ["haircut", "hair", "eyeglasses", "glasses"]
-                    # )
                     mask = face_asset_combine(
-                        mask, mask_final, CLASSES, ["eyeglasses", "glasses"]
+                        mask,
+                        mask_final,
+                        CLASSES,
+                        np.ones((3, 3)),
+                        ["eyeglasses", "glasses"],
+                        ["haircut", "hair"],
                     )
 
                     mask_final[cls_id] = mask
@@ -279,9 +289,9 @@ if __name__ == '__main__':
                         mask_other += mask_final[other_cls_id]
                     mask_final[cls_id] = mask * (mask_other == 0)
 
-                if (mask_final[cls_id] / 255.0).sum() > 500:
-                    if CLASSES[cls_id] != "eyeglasses":
+                if (mask_final[cls_id]).sum() > 500:
+                    if CLASSES[cls_id] not in ["eyeglasses", "glasses"]:
                         cv2.imwrite(
                             f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
-                            mask_final[cls_id].astype(np.uint8)
+                            mask_final[cls_id].astype(np.uint8) * 255
                         )

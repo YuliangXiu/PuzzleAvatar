@@ -7,5 +7,5 @@ python multi_concepts/inference.py \
   --model_dir results/$1 \
   --instance_dir data/$1 \
   --num_samples 10 \
-  --use_peft "none" \
+  --use_peft "lora" \
    # --use_shape_description \

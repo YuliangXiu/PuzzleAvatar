@@ -19,11 +19,9 @@ import glob
 import hashlib
 import itertools
 import json
-import sys
 import logging
 import math
 import os
-import wandb
 import random
 import warnings
 from pathlib import Path
@@ -44,10 +42,11 @@ from accelerate.utils import set_seed
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
+    DDPMScheduler,
     DiffusionPipeline,
     UNet2DConditionModel,
 )
-from diffusers.models.attention_processor import Attention
+from diffusers.models.cross_attention import CrossAttention
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
@@ -59,21 +58,9 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "../thirdparties/peft/src"))
-
-from peft import LoraConfig, BOFTConfig, get_peft_model
-
 check_min_version("0.12.0")
 
 logger = get_logger(__name__)
-
-UNET_TARGET_MODULES = [
-    "to_q", "to_v", "to_k", "proj_in", "proj_out", "to_out.0", "add_k_proj", "add_v_proj",
-    "ff.net.2"
-]
-TEXT_ENCODER_TARGET_MODULES = [
-    "embed_tokens", "q_proj", "k_proj", "v_proj", "out_proj", "mlp.fc1", "mlp.fc2"
-]
 
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
@@ -98,12 +85,12 @@ def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: st
         raise ValueError(f"{model_class} is not supported.")
 
 
-def parse_args():
+def parse_args(input_args=None):
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
-        default="stabilityai/stable-diffusion-2-1",
+        default="stabilityai/stable-diffusion-2-1-base",
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
@@ -155,19 +142,7 @@ def parse_args():
         dest="with_prior_preservation"
     )
     parser.add_argument(
-        "--use_shape_description",
-        action="store_true",
-        help="Flag to use shape description loss.",
-    )
-
-    parser.add_argument(
         "--prior_loss_weight",
-        type=float,
-        default=1.0,
-        help="The weight of prior preservation loss.",
-    )
-    parser.add_argument(
-        "--person_prior_loss_weight",
         type=float,
         default=1.0,
         help="The weight of prior preservation loss.",
@@ -382,7 +357,7 @@ def parse_args():
     parser.add_argument(
         "--report_to",
         type=str,
-        default="wandb",
+        default="tensorboard",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
@@ -429,39 +404,6 @@ def parse_args():
             " https://pytorch.org/docs/stable/generated/torch.optim.Optimizer.zero_grad.html"
         ),
     )
-    # boft args
-    parser.add_argument(
-        "--use_peft",
-        type=str,
-        default="none",
-        help="which peft to use, can be 'none', 'lora' or 'boft'",
-    )
-    parser.add_argument("--boft_block_num", type=int, default=4, help="The number of BOFT blocks")
-    parser.add_argument("--boft_block_size", type=int, default=0, help="The size of BOFT blocks")
-    parser.add_argument(
-        "--boft_n_butterfly_factor", type=int, default=2, help="The number of butterfly factors"
-    )
-    parser.add_argument("--boft_bias_fit", action="store_true", help="Whether to use bias fit")
-    parser.add_argument(
-        "--boft_dropout",
-        type=float,
-        default=0.1,
-        help="BOFT dropout, only used if use_peft is 'boft'",
-    )
-    parser.add_argument(
-        "--boft_bias",
-        type=str,
-        default="none",
-        help=
-        "Bias type for BOFT. Can be 'none', 'all' or 'boft_only', only used if use_peft is 'boft'",
-    )
-    parser.add_argument(
-        "--lora_r",
-        type=int,
-        default=64,
-        help="The number of Lora rank",
-    )
-
     parser.add_argument("--lambda_attention", type=float, default=1e-2)
     parser.add_argument("--img_log_steps", type=int, default=200)
     parser.add_argument("--num_of_assets", type=int, default=1)
@@ -484,20 +426,18 @@ def parse_args():
         help="Indicator to log intermediate model checkpoints",
     )
 
-    args = parser.parse_args()
-
-    if args.train_text_encoder:
-        args.mixed_precision = "no"
+    if input_args is not None:
+        args, = parser.parse_args(input_args)
+    else:
+        args = parser.parse_args()
 
     with open(os.path.join(args.instance_data_dir, 'gpt4v_response.json'), 'r') as f:
         gpt4v_response = json.load(f)
     args.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
     gpt4v_classes = list(gpt4v_response.keys())
-
+    
     gpt4v_classes.remove("gender")
-    for key in ["eyeglasses", "sunglasses", "glasses"]:
-        if key in gpt4v_classes:
-            gpt4v_classes.remove(key)
+    gpt4v_classes.remove("eyeglasses")
 
     args.num_of_assets = len(gpt4v_classes)
     args.initializer_tokens = gpt4v_classes
@@ -521,7 +461,7 @@ def parse_args():
         if args.class_prompt is not None:
             warnings.warn("You need not use --class_prompt without --with_prior_preservation.")
 
-    return args, gpt4v_response
+    return args
 
 
 class DreamBoothDataset(Dataset):
@@ -535,26 +475,18 @@ class DreamBoothDataset(Dataset):
         placeholder_tokens,
         tokenizer,
         initializer_tokens,
-        gpt4v_response,
-        use_shape_desc,
-        with_prior_preservation,
         num_class_images,
         gender,
         class_data_root=None,
         size=512,
         center_crop=False,
         flip_p=0.5,
-        sd_version="stable-diffusion-2-1",
     ):
         self.size = size
         self.center_crop = center_crop
         self.tokenizer = tokenizer
         self.flip_p = flip_p
         self.gender = gender
-        self.sd_version = sd_version
-        self.gpt4v_response = gpt4v_response
-        self.use_shape_desc = use_shape_desc
-        self.with_prior_preservation = with_prior_preservation
 
         self.image_transforms = transforms.Compose([
             transforms.Resize((self.size, self.size)),
@@ -578,50 +510,40 @@ class DreamBoothDataset(Dataset):
         self.num_class_images = num_class_images
 
         instance_img_paths = sorted(glob.glob(f"{instance_data_root}/image/*"))
+        self._length = max(len(instance_img_paths), self.num_class_images)
 
-        self.instance_images = []
+        self.instance_images = [
+            self.image_transforms(Image.open(path))[:3] for path in instance_img_paths
+        ]
         self.instance_masks = []
-        self.instance_descriptions = []
 
-        for instance_img_path in instance_img_paths:
-            instance_idx = instance_img_path.split("/")[-1].split(".")[0]
-            instance_mask_paths = glob.glob(f"{instance_data_root}/mask/{instance_idx}_*.png")
+        for i in range(len(instance_img_paths)):
+            instance_mask_paths = glob.glob(f"{instance_data_root}/mask/{i:02d}_*.png")
+            instance_mask = []
+            instance_placeholder_token = []
+            instance_class_tokens = []
 
-            if len(instance_mask_paths) > 0:
-
-                self.instance_images.append(
-                    self.image_transforms(Image.open(instance_img_path))[:3]
+            for instance_mask_path in instance_mask_paths:
+                curr_mask = Image.open(instance_mask_path)
+                curr_mask = self.mask_transforms(curr_mask)[0, None, None, ...]
+                instance_mask.append(curr_mask)
+                curr_token = instance_mask_path.split(".")[0].split("_")[-1]
+                instance_placeholder_token.append(
+                    self.placeholder_full[self.initializer_tokens.index(curr_token)]
                 )
-                instance_mask = []
-                instance_placeholder_token = []
-                instance_class_tokens = []
-                instance_description = []
+                instance_class_tokens.append(curr_token)
 
-                for instance_mask_path in instance_mask_paths:
-                    curr_mask = Image.open(instance_mask_path)
-                    curr_mask = self.mask_transforms(curr_mask)[0, None, None, ...]
-                    instance_mask.append(curr_mask)
-                    curr_token = instance_mask_path.split(".")[0].split("_")[-1]
-                    instance_placeholder_token.append(
-                        self.placeholder_full[self.initializer_tokens.index(curr_token)]
-                    )
-                    instance_class_tokens.append(curr_token)
-                    instance_description.append(self.gpt4v_response[curr_token])
-
-                self.instance_masks.append(torch.cat(instance_mask))
-                self.placeholder_tokens.append(instance_placeholder_token)
-                self.class_tokens.append(instance_class_tokens)
-                self.instance_descriptions.append(instance_description)
+            self.instance_masks.append(torch.cat(instance_mask))
+            self.placeholder_tokens.append(instance_placeholder_token)
+            self.class_tokens.append(instance_class_tokens)
 
         self.class_images_path = {}
-        if self.class_data_root is not None and self.with_prior_preservation:
-            for class_name in self.initializer_tokens + [self.gender]:
-                class_data_dir = Path(class_data_root) / self.sd_version / class_name
+        if self.class_data_root is not None:
+            for class_name in self.initializer_tokens:
+                class_data_dir = Path(class_data_root) / class_name
                 self.class_images_path[class_name] = list(class_data_dir.iterdir())
         else:
             self.class_data_root = None
-
-        self._length = max(len(self.instance_images), self.num_class_images)
 
     def __len__(self):
 
@@ -644,63 +566,42 @@ class DreamBoothDataset(Dataset):
             self.class_tokens[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
         ]
 
-        descs_to_use = [
-            self.instance_descriptions[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
-        ]
-
-        if not self.use_shape_desc:
-            descs_to_use = ["" for _ in descs_to_use]
-
-        prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
-        with_classes = ['face', 'haircut', 'hair']
+        prompt_head = f"a high-resolution DSLR image of a {self.gender}"
+        with_classes = ['face', 'haircut']
 
         if not np.isin(with_classes, classes_to_use).any():
             prompt = f"{prompt_head}, wearing " + " and ".join([
-                f"{placeholder_token} {desc} {class_token}"
-                for (placeholder_token, desc,
-                     class_token) in zip(tokens_to_use, descs_to_use, classes_to_use)
+                f"{placeholder_token} {class_token}"
+                for (placeholder_token, class_token) in zip(tokens_to_use, classes_to_use)
             ]) + "."
-            prompt_raw = f"{prompt_head}, wearing " + " and ".join(classes_to_use) + "."
         else:
             prompt = f"{prompt_head}, "
-            prompt_raw = f"{prompt_head}, "
 
-            # with {face} and {haircut} and {hair}
+            # with {face} and {haircut}
             for name in with_classes:
                 if name in classes_to_use:
                     idx = classes_to_use.index(name)
-                    prompt += f"{tokens_to_use[idx]} {descs_to_use[idx]} {name}, "
-                    prompt_raw += f"{name}, "
+                    prompt += f"{tokens_to_use[idx]} {name}, "
 
             # wearing {garment} and {eyeglasses}
             prompt += "wearing " + " and ".join([
-                f"{placeholder_token} {desc} {class_token}"
-                for (placeholder_token, desc,
-                     class_token) in zip(tokens_to_use, descs_to_use, classes_to_use)
+                f"{placeholder_token} {class_token}"
+                for (placeholder_token, class_token) in zip(tokens_to_use, classes_to_use)
                 if class_token not in with_classes
             ]) + "."
-            prompt_raw += "wearing " + " and ".join([
-                f"{class_token}"
-                for class_token in classes_to_use if class_token not in with_classes
-            ]) + "."
-
+        
         prompt = prompt.replace(", wearing .", ".")
-        prompt = prompt.replace("  ", " ")
-        prompt_raw = prompt_raw.replace(", wearing .", ".")
-        prompt_raw = prompt_raw.replace("  ", " ")
+        print(prompt)
 
         example["instance_images"] = self.instance_images[index % example_len]
         example["instance_masks"] = self.instance_masks[index % example_len][tokens_ids_to_use]
         example["token_ids"] = torch.tensor([
             self.placeholder_full.index(token) for token in tokens_to_use
         ])
-        example["full_masks"] = self.instance_masks[index %
-                                                    example_len].max(dim=0, keepdims=True).values
 
         if random.random() > self.flip_p:
             example["instance_images"] = TF.hflip(example["instance_images"])
             example["instance_masks"] = TF.hflip(example["instance_masks"])
-            example["full_masks"] = TF.hflip(example["full_masks"])
 
         example["instance_prompt_ids"] = self.tokenizer(
             prompt,
@@ -710,17 +611,7 @@ class DreamBoothDataset(Dataset):
             return_tensors="pt",
         ).input_ids
 
-        example["instance_prompt_ids_raw"] = self.tokenizer(
-            prompt_raw,
-            truncation=True,
-            padding="max_length",
-            max_length=self.tokenizer.model_max_length,
-            return_tensors="pt",
-        ).input_ids
-
-        if self.class_data_root and self.with_prior_preservation:
-
-            # for assets
+        if self.class_data_root:
             class_token = random.choice(classes_to_use)
             class_image = Image.open(
                 self.class_images_path[class_token][index % self.num_class_images]
@@ -730,22 +621,7 @@ class DreamBoothDataset(Dataset):
             example["class_images"] = self.image_transforms(class_image)
             with_wear_class = f"wearing {class_token}" if class_token not in with_classes else f"{class_token}"
             example["class_prompt_ids"] = self.tokenizer(
-                f"a high-resolution DSLR colored image of a {self.gender}, {with_wear_class}.",
-                truncation=True,
-                padding="max_length",
-                max_length=self.tokenizer.model_max_length,
-                return_tensors="pt",
-            ).input_ids
-
-            # for full human
-            person_image = Image.open(
-                self.class_images_path[self.gender][index % self.num_class_images]
-            )
-            if not person_image.mode == "RGB":
-                person_image = person_image.convert("RGB")
-            example["person_images"] = self.image_transforms(person_image)
-            example["person_prompt_ids"] = self.tokenizer(
-                f"a high-resolution DSLR colored image of a {self.gender} wearing daily clothes.",
+                f"a high-resolution DSLR image of a {self.gender}, {with_wear_class}.",
                 truncation=True,
                 padding="max_length",
                 max_length=self.tokenizer.model_max_length,
@@ -755,75 +631,27 @@ class DreamBoothDataset(Dataset):
         return example
 
 
-from typing import Union
-
-
-def padded_stack(
-    tensors: List[torch.Tensor],
-    mode: str = "constant",
-    value: Union[int, float] = 0,
-    dim: int = 0,
-    full_size: int = 10,
-) -> torch.Tensor:
-    """
-    Stack tensors along a dimension and pad them along last dimension to ensure their size is equal.
-
-    Args:
-        tensors (List[torch.Tensor]): list of tensors to stack
-        mode (str): 'constant', 'reflect', 'replicate' or 'circular'. Default: 'constant'
-        value (Union[int, float]): value to use for constant padding
-        dim (int): dimension along which to stack
-        full_size (int): size to pad to
-
-    Returns:
-        torch.Tensor: stacked tensor
-    """
-    def make_padding(pad):
-        padding = [0] * (tensors[0].dim() * 2)
-        padding[tensors[0].dim() * 2 - (dim * 2 + 1)] = pad
-        return padding
-
-    out = torch.stack(
-        [
-            F.pad(x, make_padding(full_size - x.size(dim)), mode=mode, value=value) if full_size -
-            x.size(dim) > 0 else x for x in tensors
-        ],
-        dim=0,
-    )
-    return out
-
-
 def collate_fn(examples, with_prior_preservation=False):
     input_ids = [example["instance_prompt_ids"] for example in examples]
-    raw_input_ids = [example["instance_prompt_ids_raw"] for example in examples]
     pixel_values = [example["instance_images"] for example in examples]
     masks = [example["instance_masks"] for example in examples]
-    full_masks = [example["full_masks"] for example in examples]
     token_ids = [example["token_ids"] for example in examples]
 
     if with_prior_preservation:
-        input_ids = [example["person_prompt_ids"] for example in examples
-                    ] + [example["class_prompt_ids"] for example in examples] + input_ids
-        pixel_values = [example["person_images"] for example in examples
-                       ] + [example["class_images"] for example in examples] + pixel_values
-
-    else:
-        input_ids = [example["instance_prompt_ids_raw"] for example in examples] + input_ids
-        pixel_values = [example["instance_images"] for example in examples] + pixel_values
+        input_ids = [example["class_prompt_ids"] for example in examples] + input_ids
+        pixel_values = [example["class_images"] for example in examples] + pixel_values
 
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
     input_ids = torch.cat(input_ids, dim=0)
-    full_masks = torch.cat(full_masks, dim=0)
-    masks = padded_stack(masks)
-    token_ids = padded_stack(token_ids)
+    masks = torch.stack(masks)
+    token_ids = torch.stack(token_ids)
 
     batch = {
         "input_ids": input_ids,
         "pixel_values": pixel_values,
         "instance_masks": masks,
-        "full_masks": full_masks,
         "token_ids": token_ids,
     }
     return batch
@@ -859,7 +687,7 @@ def get_full_repo_name(
 
 class SpatialDreambooth:
     def __init__(self):
-        self.args, self.gpt4v_response = parse_args()
+        self.args = parse_args()
         self.main()
 
     def main(self):
@@ -871,13 +699,6 @@ class SpatialDreambooth:
             log_with=self.args.report_to,
             project_dir=logging_dir,
         )
-
-        if self.args.report_to == "wandb":
-
-            wandb_init = {"wandb": {
-                "name": "multi-concept",
-                "mode": "offline",
-            }}
 
         if (
             self.args.train_text_encoder and self.args.gradient_accumulation_steps > 1 and
@@ -925,29 +746,13 @@ class SpatialDreambooth:
                 safety_checker=None,
                 revision=self.args.revision,
             )
-            pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
             pipeline.set_progress_bar_config(disable=True)
             pipeline.to(self.accelerator.device)
 
-            for class_name in self.args.initializer_tokens + [self.args.gender]:
+            for class_name in self.args.initializer_tokens:
 
-                prompt_head = f"a high-resolution DSLR colored image of a {self.args.gender}"
-
-                if class_name == self.args.gender:
-                    class_prompt = f"{prompt_head} wearing daily clothes."
-                elif class_name in ["face", "haircut", "hair"]:
-                    if self.args.use_shape_description:
-                        class_prompt = f"{prompt_head}, {self.gpt4v_response[class_name]} {class_name}."
-                    else:
-                        class_prompt = f"{prompt_head}, {class_name}."
-                else:
-                    if self.args.use_shape_description:
-                        class_prompt = f"{prompt_head}, wearing {self.gpt4v_response[class_name]} {class_name}."
-                    else:
-                        class_prompt = f"{prompt_head}, wearing {class_name}."
-
-                pretrained_name = self.args.pretrained_model_name_or_path.split("/")[-1]
-                class_images_dir = Path(self.args.class_data_dir) / pretrained_name / class_name
+                class_prompt = f"a high-resolution DSLR image of {self.args.gender}, wearing {class_name}"
+                class_images_dir = Path(self.args.class_data_dir) / class_name
 
                 if not class_images_dir.exists():
                     class_images_dir.mkdir(parents=True)
@@ -967,16 +772,10 @@ class SpatialDreambooth:
 
                     for example in tqdm(
                         sample_dataloader,
-                        desc=f"Generating {class_name} images",
+                        desc="Generating class images",
                         disable=not self.accelerator.is_local_main_process,
                     ):
-
-                        negative_prompt = 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy, shadow, worst quality, jpeg artifacts, poorly drawn, dehydrated, noisy, poorly drawn, bad proportions, bad anatomy, bad lighting, bad composition, bad framing, fused fingers, noisy, duplicate characters'
-
-                        images = pipeline(
-                            example["prompt"],
-                            negative_prompt=[negative_prompt] * len(example["prompt"])
-                        ).images
+                        images = pipeline(example["prompt"]).images
 
                         for i, image in enumerate(images):
                             hash_image = hashlib.sha1(image.tobytes()).hexdigest()
@@ -1000,7 +799,7 @@ class SpatialDreambooth:
         )
 
         # Load scheduler and models
-        self.noise_scheduler = DDIMScheduler.from_pretrained(
+        self.noise_scheduler = DDPMScheduler.from_pretrained(
             self.args.pretrained_model_name_or_path, subfolder="scheduler"
         )
         self.text_encoder = text_encoder_cls.from_pretrained(
@@ -1041,7 +840,7 @@ class SpatialDreambooth:
         assert num_added_tokens == self.args.num_of_assets
         self.placeholder_token_ids = self.tokenizer.convert_tokens_to_ids(self.placeholder_tokens)
         self.text_encoder.resize_token_embeddings(len(self.tokenizer))
-        self.args.instance_prompt = f"a high-resolution DSLR colored image of a {self.args.gender},  " + " and ".join(
+        self.args.instance_prompt = "a high-resolution DSLR image of " + " and ".join(
             self.placeholder_tokens
         )
 
@@ -1059,15 +858,18 @@ class SpatialDreambooth:
                                                                    self.args.num_of_assets]
 
         # Set validation scheduler for logging
-        self.validation_scheduler = DDIMScheduler.from_pretrained(
-            self.args.pretrained_model_name_or_path, subfolder="scheduler"
+        self.validation_scheduler = DDIMScheduler(
+            beta_start=0.00085,
+            beta_end=0.012,
+            beta_schedule="scaled_linear",
+            clip_sample=False,
+            set_alpha_to_one=False,
         )
         self.validation_scheduler.set_timesteps(50)
 
         # We start by only optimizing the embeddings
         self.vae.requires_grad_(False)
         self.unet.requires_grad_(False)
-
         # Freeze all parameters except for the token embeddings in text encoder
         self.text_encoder.text_model.encoder.requires_grad_(False)
         self.text_encoder.text_model.final_layer_norm.requires_grad_(False)
@@ -1120,16 +922,12 @@ class SpatialDreambooth:
             instance_data_root=self.args.instance_data_dir,
             placeholder_tokens=self.placeholder_tokens,
             initializer_tokens=self.args.initializer_tokens,
-            gpt4v_response=self.gpt4v_response,
-            use_shape_desc=self.args.use_shape_description,
-            with_prior_preservation=self.args.with_prior_preservation,
             num_class_images=self.args.num_class_images,
             gender=self.args.gender,
             class_data_root=self.args.class_data_dir if self.args.with_prior_preservation else None,
             tokenizer=self.tokenizer,
             size=self.args.resolution,
             center_crop=self.args.center_crop,
-            sd_version=self.args.pretrained_model_name_or_path.split("/")[-1],
         )
 
         logger.info(f"Placeholder Tokens: {self.placeholder_tokens}")
@@ -1171,16 +969,16 @@ class SpatialDreambooth:
             self.unet, self.text_encoder, optimizer, train_dataloader, lr_scheduler
         )
 
+        # For mixed precision training we cast the text_encoder and vae weights to half-precision
+        # as these models are only used for inference, keeping weights in full precision is not required.
         self.weight_dtype = torch.float32
         if self.accelerator.mixed_precision == "fp16":
             self.weight_dtype = torch.float16
         elif self.accelerator.mixed_precision == "bf16":
             self.weight_dtype = torch.bfloat16
 
-        # Move unet, vae and text_encoder to device and cast to weight_dtype
-        self.unet.to(self.accelerator.device, dtype=self.weight_dtype)
+        # Move vae and text_encoder to device and cast to weight_dtype
         self.vae.to(self.accelerator.device, dtype=self.weight_dtype)
-        self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
 
         low_precision_error_string = (
             "Please make sure to always have all model weights in full float32 precision when starting training - even if"
@@ -1219,9 +1017,7 @@ class SpatialDreambooth:
         # We need to initialize the trackers we use, and also store our configuration.
         # The trackers initializes automatically on the main process.
         if self.accelerator.is_main_process:
-            self.accelerator.init_trackers(
-                "dreambooth", config=vars(self.args), init_kwargs=wandb_init
-            )
+            self.accelerator.init_trackers("dreambooth", config=vars(self.args))
 
         # Train
         total_batch_size = (
@@ -1287,91 +1083,23 @@ class SpatialDreambooth:
         self.register_attention_control(self.controller)
 
         for epoch in range(first_epoch, self.args.num_train_epochs):
-
             self.unet.train()
             if self.args.train_text_encoder:
                 self.text_encoder.train()
-
             for step, batch in enumerate(train_dataloader):
-
                 if self.args.phase1_train_steps == global_step:
-
-                    if self.args.use_peft == "none":
-                        self.unet.requires_grad_(True)
-
-                    else:
-                        if self.args.use_peft == "boft":
-                            unet_config = BOFTConfig(
-                                boft_block_size=self.args.boft_block_size,
-                                boft_block_num=self.args.boft_block_num,
-                                boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
-                                target_modules=UNET_TARGET_MODULES,
-                                boft_dropout=self.args.boft_dropout,
-                                bias=self.args.boft_bias
-                            )
-                        elif self.args.use_peft == "lora":
-
-                            unet_config = LoraConfig(
-                                r=self.args.lora_r,
-                                lora_alpha=self.args.lora_r,
-                                init_lora_weights="gaussian",
-                                target_modules=UNET_TARGET_MODULES,
-                                lora_dropout=self.args.boft_dropout,
-                                bias="lora_only"
-                            )
-
-                        self.unet = get_peft_model(self.unet, unet_config)
-                        self.unet.to(self.accelerator.device)
-                        self.unet.print_trainable_parameters()
-
-                        logger.info("***** Training with BOFT fine-tuning (unet) *****")
-                        logger.info(f"Structure of UNet be like: {self.unet} \n")
-
+                    self.unet.requires_grad_(True)
                     if self.args.train_text_encoder:
-                        if self.args.use_peft == "none":
-                            self.text_encoder.requires_grad_(True)
-                        else:
-                            if self.args.use_peft == "boft":
-                                text_config = BOFTConfig(
-                                    boft_block_size=self.args.boft_block_size,
-                                    boft_block_num=self.args.boft_block_num,
-                                    boft_n_butterfly_factor=self.args.boft_n_butterfly_factor,
-                                    target_modules=TEXT_ENCODER_TARGET_MODULES,
-                                    boft_dropout=self.args.boft_dropout,
-                                    bias=self.args.boft_bias
-                                )
-                            elif self.args.use_peft == "lora":
-                                text_config = LoraConfig(
-                                    r=self.args.lora_r,
-                                    lora_alpha=self.args.lora_r,
-                                    init_lora_weights="gaussian",
-                                    target_modules=TEXT_ENCODER_TARGET_MODULES,
-                                    lora_dropout=self.args.boft_dropout,
-                                    bias="lora_only"
-                                )
-
-                            self.text_encoder = get_peft_model(self.text_encoder, text_config)
-                            self.text_encoder.to(self.accelerator.device)
-                            self.text_encoder.print_trainable_parameters()
-
-                            logger.info("***** Training with BOFT fine-tuning (text_encoder) *****")
-                            logger.info(
-                                f"Structure of Text Encoder be like: {self.text_encoder} \n"
-                            )
-
-                    unet_params = [param for param in self.unet.parameters() if param.requires_grad]
-                    text_params = [
-                        param for param in self.text_encoder.parameters() if param.requires_grad
-                    ]
+                        self.text_encoder.requires_grad_(True)
+                    unet_params = self.unet.parameters()
 
                     params_to_optimize = (
-                        itertools.chain(unet_params, text_params)
+                        itertools.chain(unet_params, self.text_encoder.parameters())
                         if self.args.train_text_encoder else itertools.chain(
                             unet_params,
                             self.text_encoder.get_input_embeddings().parameters(),
                         )
                     )
-
                     del optimizer
                     optimizer = optimizer_class(
                         params_to_optimize,
@@ -1443,57 +1171,17 @@ class SpatialDreambooth:
 
                     if self.args.with_prior_preservation:
                         # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
-                        model_pred_person_prior, model_pred_prior, model_pred = torch.chunk(
-                            model_pred, 3, dim=0
-                        )
-                        target_person_prior, target_prior, target = torch.chunk(target, 3, dim=0)
+                        model_pred_prior, model_pred = torch.chunk(model_pred, 2, dim=0)
+                        target_prior, target = torch.chunk(target, 2, dim=0)
 
                         if self.args.apply_masked_loss:
                             max_masks = torch.max(batch["instance_masks"], axis=1).values
-
-                            # [1,1,64,64]
                             downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
-
-                            # # with background
-                            # full_masks = batch["full_masks"]
-                            # downsampled_full_mask = F.interpolate(input=full_masks, size=(64, 64))
-                            # downsampled_mask = torch.max(
-                            #     torch.cat([downsampled_mask, 1.0 - downsampled_full_mask]),
-                            #     dim=1,
-                            #     keepdims=True
-                            # ).values
-
-                            # # full masked
-                            # model_pred_full = model_pred * downsampled_full_mask
-                            # target_full = target * downsampled_full_mask
-
-                            # partial masked
                             model_pred = model_pred * downsampled_mask
                             target = target * downsampled_mask
 
-                        loss = 0.
-
-                        # full body prior
-                        full_loss = F.mse_loss(
-                            model_pred_person_prior.float(),
-                            target_person_prior.float(),
-                            reduction="mean"
-                        )
-
-                        loss += self.args.person_prior_loss_weight * full_loss
-                        logs["l_full"] = full_loss.detach().item()
-
                         # Compute instance loss
-                        loss_inst = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                        loss += loss_inst
-                        logs["l_inst"] = loss_inst.detach().item()
-
-                        # # Compute full instance loss (harm the decomposition)
-                        # loss_inst_full = F.mse_loss(
-                        #     model_pred_full.float(), target_full.float(), reduction="mean"
-                        # )
-                        # logs["l_inst_F"] = loss_inst_full.detach().item()
-                        # loss += loss_inst_full
+                        loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                         # Compute prior loss
                         prior_loss = F.mse_loss(
@@ -1503,39 +1191,19 @@ class SpatialDreambooth:
                         )
 
                         # Add the prior loss to the instance loss.
-                        loss += self.args.prior_loss_weight * prior_loss
-                        logs["l_prior"] = prior_loss.detach().item()
+                        loss = loss + self.args.prior_loss_weight * prior_loss
                     else:
-
-                        model_pred_raw, model_pred = torch.chunk(model_pred, 2, dim=0)
-                        target_raw, target = torch.chunk(target, 2, dim=0)
-
-                        # Compute prior loss
-                        prior_loss = F.mse_loss(
-                            model_pred_raw.float().detach(),
-                            model_pred.float(),
-                            reduction="mean",
-                        )
-
-                        # Add the prior loss to the instance loss.
-                        loss = self.args.prior_loss_weight * prior_loss
-                        logs["l_prior"] = prior_loss.detach().item()
-
                         if self.args.apply_masked_loss:
                             max_masks = torch.max(batch["instance_masks"], axis=1).values
                             downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
                             model_pred = model_pred * downsampled_mask
                             target = target * downsampled_mask
-
-                        loss_inst = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                        logs["l_inst"] = loss_inst.detach().item()
-                        loss += loss_inst
+                        loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                     # Attention loss
                     if self.args.lambda_attention != 0:
                         attn_loss = 0
                         for batch_idx in range(self.args.train_batch_size):
-
                             GT_masks = F.interpolate(
                                 input=batch["instance_masks"][batch_idx], size=(16, 16)
                             )
@@ -1545,15 +1213,9 @@ class SpatialDreambooth:
                                 is_cross=True,
                                 select=batch_idx,
                             )
+                            curr_cond_batch_idx = self.args.train_batch_size + batch_idx
 
-                            if self.args.with_prior_preservation:
-                                curr_cond_batch_idx = 2 * self.args.train_batch_size + batch_idx
-                            else:
-                                curr_cond_batch_idx = 1 * self.args.train_batch_size + batch_idx
-
-                            valid_masks_num = len(GT_masks.sum(dim=(2, 3)).flatten().nonzero())
-
-                            for mask_id in range(valid_masks_num):
+                            for mask_id in range(len(GT_masks)):
                                 curr_placeholder_token_id = self.placeholder_token_ids[
                                     batch["token_ids"][batch_idx][mask_id]]
 
@@ -1562,22 +1224,19 @@ class SpatialDreambooth:
                                     curr_placeholder_token_id
                                 ).nonzero().item())
 
-                                # <asset>
-                                for offset in range(2):
-                                    asset_attn_mask = agg_attn[..., asset_idx + offset]
-                                    asset_attn_mask = (asset_attn_mask / asset_attn_mask.max())
-
-                                    attn_loss += F.mse_loss(
-                                        GT_masks[mask_id, 0].float(),
-                                        asset_attn_mask.float(),
-                                        reduction="mean",
-                                    )
+                                asset_attn_mask = agg_attn[..., asset_idx]
+                                asset_attn_mask = (asset_attn_mask / asset_attn_mask.max())
+                                attn_loss += F.mse_loss(
+                                    GT_masks[mask_id, 0].float(),
+                                    asset_attn_mask.float(),
+                                    reduction="mean",
+                                )
 
                         attn_loss = self.args.lambda_attention * (
                             attn_loss / self.args.train_batch_size
                         )
+                        logs["attn_loss"] = attn_loss.detach().item()
                         loss += attn_loss
-                        logs["l_attn"] = attn_loss.detach().item()
 
                     self.accelerator.backward(loss)
 
@@ -1607,12 +1266,23 @@ class SpatialDreambooth:
                     progress_bar.update(1)
                     global_step += 1
 
-                    if global_step % self.args.checkpointing_steps == 0 and global_step > self.args.phase1_train_steps:
+                    if global_step % self.args.checkpointing_steps == 0:
                         if self.accelerator.is_main_process:
+                            save_path = os.path.join(
+                                self.args.output_dir, f"checkpoint-{global_step}"
+                            )
+                            self.accelerator.save_state(save_path)
+                            logger.info(f"Saved state to {save_path}")
 
-                            self.save_adaptor(step=global_step)
-
-                    if (self.args.log_checkpoints and global_step % self.args.img_log_steps == 0):
+                    if (
+                        self.args.log_checkpoints and global_step % self.args.img_log_steps == 0 and
+                        global_step > self.args.phase1_train_steps
+                    ):
+                        ckpts_path = os.path.join(
+                            self.args.output_dir, "checkpoints", f"{global_step:05}"
+                        )
+                        os.makedirs(ckpts_path, exist_ok=True)
+                        self.save_pipeline(ckpts_path)
 
                         img_logs_path = os.path.join(self.args.output_dir, "img_logs")
                         os.makedirs(img_logs_path, exist_ok=True)
@@ -1624,25 +1294,22 @@ class SpatialDreambooth:
                                                           (last_sentence != 49406) &
                                                           (last_sentence != 49407)]
                             last_sentence = self.tokenizer.decode(last_sentence)
-
                             self.save_cross_attention_vis(
                                 last_sentence,
-                                batch_pixels=batch["pixel_values"]
-                                [curr_cond_batch_idx].detach().cpu(),
                                 attention_maps=agg_attn.detach().cpu(),
                                 path=os.path.join(img_logs_path, f"{global_step:05}_step_attn.jpg"),
                             )
-
                         self.controller.cur_step = 0
                         self.controller.attention_store = {}
 
-                        full_rgb = self.perform_full_inference()
+                        self.perform_full_inference(
+                            path=os.path.join(img_logs_path, f"{global_step:05}_full_pred.jpg")
+                        )
                         full_agg_attn = self.aggregate_attention(
                             res=16, from_where=("up", "down"), is_cross=True, select=0
                         )
                         self.save_cross_attention_vis(
                             self.args.instance_prompt,
-                            batch_pixels=full_rgb,
                             attention_maps=full_agg_attn.detach().cpu(),
                             path=os.path.join(img_logs_path, f"{global_step:05}_full_attn.jpg"),
                         )
@@ -1657,38 +1324,21 @@ class SpatialDreambooth:
                 if global_step >= self.args.max_train_steps:
                     break
 
+        self.save_pipeline(self.args.output_dir)
+
         self.accelerator.end_training()
-        self.save_adaptor()
 
-    def save_adaptor(self, step=""):
-
-        if self.args.use_peft != "none":
-
-            unwarpped_unet = self.accelerator.unwrap_model(self.unet)
-            unwarpped_unet.save_pretrained(
-                os.path.join(self.args.output_dir, f"unet/{step}"),
-                state_dict=self.accelerator.get_state_dict(self.unet)
-            )
-            logger.info(f"Saved unet to {os.path.join(self.args.output_dir, f'unet/{step}')}")
-
-            if self.args.train_text_encoder:
-
-                unwarpped_text_encoder = self.accelerator.unwrap_model(self.text_encoder)
-                unwarpped_text_encoder.save_pretrained(
-                    os.path.join(self.args.output_dir, f"text_encoder/{step}"),
-                    state_dict=self.accelerator.get_state_dict(self.text_encoder),
-                    save_embedding_layers=True,
-                )
-                logger.info(
-                    f"Saved text_encoder to {os.path.join(self.args.output_dir, f'text_encoder/{step}')}"
-                )
-        else:
+    def save_pipeline(self, path):
+        self.accelerator.wait_for_everyone()
+        if self.accelerator.is_main_process:
             pipeline = DiffusionPipeline.from_pretrained(
                 self.args.pretrained_model_name_or_path,
                 unet=self.accelerator.unwrap_model(self.unet),
                 text_encoder=self.accelerator.unwrap_model(self.text_encoder),
+                tokenizer=self.tokenizer,
+                revision=self.args.revision,
             )
-            pipeline.save_pretrained(self.args.output_dir)
+            pipeline.save_pretrained(path)
 
     def register_attention_control(self, controller):
         attn_procs = {}
@@ -1741,7 +1391,7 @@ class SpatialDreambooth:
         return out
 
     @torch.no_grad()
-    def perform_full_inference(self, guidance_scale=7.5):
+    def perform_full_inference(self, path, guidance_scale=7.5):
         self.unet.eval()
         self.text_encoder.eval()
 
@@ -1776,7 +1426,6 @@ class SpatialDreambooth:
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
             latents = self.validation_scheduler.step(noise_pred, t, latents).prev_sample
-
         latents = 1 / 0.18215 * latents
 
         images = self.vae.decode(latents.to(self.weight_dtype)).sample
@@ -1784,52 +1433,25 @@ class SpatialDreambooth:
         images = images.detach().cpu().permute(0, 2, 3, 1).numpy()
         images = (images * 255).round().astype("uint8")
 
-        self.accelerator.trackers[0].log({
-            "validation": [
-                wandb.Image(image, caption=f"{i:02d}: {self.args.instance_prompt}")
-                for i, image in enumerate(images)
-            ]
-        })
-
         self.unet.train()
         if self.args.train_text_encoder:
             self.text_encoder.train()
 
-        return Image.fromarray(images[0])
+        Image.fromarray(images[0]).save(path)
 
     @torch.no_grad()
-    def save_cross_attention_vis(self, prompt, batch_pixels, attention_maps, path):
-
+    def save_cross_attention_vis(self, prompt, attention_maps, path):
         tokens = self.tokenizer.encode(prompt)
         images = []
-
-        if torch.is_tensor(batch_pixels):
-            image = batch_pixels.permute(1, 2, 0).numpy()
-            image = ((image + 1.0) * 0.5 * 255).round().astype("uint8")
-            image = np.array(Image.fromarray(image).resize((256, 256)))
-        elif isinstance(batch_pixels, Image.Image):
-            image = np.array(batch_pixels.resize((256, 256)))
-
-        image = ptp_utils.text_under_image(image, "raw pixels")
-        images.append(image)
-
         for i in range(len(tokens)):
-            asset_word = self.tokenizer.decode(int(tokens[i]))
-            if ("asset" in asset_word) or (asset_word in self.gpt4v_response.keys()):
-                image = attention_maps[:, :, i]
-                image = 255 * image / image.max()
-                image = image.unsqueeze(-1).expand(*image.shape, 3)
-                image = image.numpy().astype(np.uint8)
-                image = np.array(Image.fromarray(image).resize((256, 256)))
-                image = ptp_utils.text_under_image(image, asset_word)
-                images.append(image)
-
+            image = attention_maps[:, :, i]
+            image = 255 * image / image.max()
+            image = image.unsqueeze(-1).expand(*image.shape, 3)
+            image = image.numpy().astype(np.uint8)
+            image = np.array(Image.fromarray(image).resize((256, 256)))
+            image = ptp_utils.text_under_image(image, self.tokenizer.decode(int(tokens[i])))
+            images.append(image)
         vis = ptp_utils.view_images(np.stack(images, axis=0))
-
-        self.accelerator.trackers[0].log({
-            "cross_attention_vis": [wandb.Image(vis, caption=f"{prompt}")]
-        })
-
         vis.save(path)
 
 
@@ -1841,7 +1463,7 @@ class P2PCrossAttnProcessor:
 
     def __call__(
         self,
-        attn: Attention,
+        attn: CrossAttention,
         hidden_states,
         encoder_hidden_states=None,
         attention_mask=None,
@@ -1879,5 +1501,4 @@ class P2PCrossAttnProcessor:
 
 
 if __name__ == "__main__":
-    torch.autograd.set_detect_anomaly(False)
     SpatialDreambooth()

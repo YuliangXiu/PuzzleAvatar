@@ -83,6 +83,18 @@
         {
             "filePath": "data/PuzzleIOI/puzzle/03595/outfit13",
             "group": "Default"
+        },
+        {
+            "filePath": "scripts/train_multi_concepts.sh",
+            "group": "Default"
+        },
+        {
+            "filePath": "scripts/run.sh",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/human/yuliang/ground_sam.out",
+            "group": "Default"
         }
     ]
 }

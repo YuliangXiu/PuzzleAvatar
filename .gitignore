@@ -11,6 +11,7 @@ logs
 *.pt
 *.txt
 .vscode
+wandb
 OPENAI_API_KEY
 cores/lib/freqencoder/build
 cores/lib/gridencoder/build

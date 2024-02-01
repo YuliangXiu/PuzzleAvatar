@@ -23,7 +23,7 @@ def load_config(path, default_path=None):
     return cfg
 
 
-def dict_to_prompt(d):
+def dict_to_prompt(d, use_shape=False):
 
     prompt = "a high-resolution DSLR colored image of"
     keys = list(d.keys())
@@ -41,11 +41,19 @@ def dict_to_prompt(d):
     for key in with_classes:
         if key in keys:
             idx = keys.index(key)
-            prompt += f"<asset{idx}> {d[key]} {key}, "
+            if use_shape:
+                prompt += f"<asset{idx}> {d[key]} {key}, "
+            else:
+                prompt += f"<asset{idx}> {key}, "
 
-    prompt += "wearing " + " , ".join([
-        f"<asset{keys.index(key)}> {d[key]} {key}" for key in keys if key not in with_classes
-    ]) + "."
+    if use_shape:
+        prompt += "wearing " + " , ".join([
+            f"<asset{keys.index(key)}> {d[key]} {key}" for key in keys if key not in with_classes
+        ]) + " at the beach."
+    else:
+        prompt += "wearing " + " , ".join([
+            f"<asset{keys.index(key)}> {key}" for key in keys if key not in with_classes
+        ]) + " at the beach."
 
     placeholders = []
     for key in keys:
@@ -65,6 +73,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=42, help="random seed")
     parser.add_argument('--use_peft', type=str, default="none", help="none/lora/boft")
     parser.add_argument('--test', action="store_true")
+    parser.add_argument('--use_shape_description', action="store_true")
 
     opt = parser.parse_args()
     cfg = load_config(opt.config, default_path="configs/default.yaml")
@@ -83,7 +92,9 @@ if __name__ == '__main__':
             os.path.join(opt.exp_dir.replace("results", "data"), 'gpt4v_response.json'), 'r'
         ) as f:
             gpt4v_response = json.load(f)
-            gender, cfg.guidance.text, placeholders = dict_to_prompt(gpt4v_response)
+            gender, cfg.guidance.text, placeholders = dict_to_prompt(
+                gpt4v_response, opt.use_shape_description
+            )
 
             print(f"Using prompt: {cfg.guidance.text}")
 
