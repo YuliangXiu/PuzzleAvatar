@@ -13,8 +13,7 @@ python multi_concepts/train.py \
   --phase2_train_steps 2000 \
   --initial_learning_rate 5e-4 \
   --learning_rate 5e-5 \
-  --person_prior_loss_weight 0.5 \
-  --prior_loss_weight 0.5 \
+  --prior_loss_weight 1.0 \
   --lambda_attention 1e-1 \
   --img_log_steps 500 \
   --checkpointing_steps 1000 \
@@ -25,7 +24,8 @@ python multi_concepts/train.py \
   --lora_r=16 \
   --enable_xformers_memory_efficient_attention \
   --use_peft "lora" \
-  --no_prior_preservation \
+  --wandb_mode "online" \
+  # --no_prior_preservation \
   # --use_shape_description \
 
 rm -rf results/$1/output

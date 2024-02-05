@@ -101,7 +101,8 @@ class AttentionControl(abc.ABC):
         attn_ = attn.clone()
         if self.cur_att_layer >= self.num_uncond_att_layers:
             h = attn.shape[0]
-            attn_[h // 2:] = self.forward(attn[h // 2:], is_cross, place_in_unet)
+            # attn_[h // 2:] = self.forward(attn[h // 2:], is_cross, place_in_unet)
+            attn_ = self.forward(attn, is_cross, place_in_unet)
         self.cur_att_layer += 1
         if self.cur_att_layer == self.num_att_layers + self.num_uncond_att_layers:
             self.cur_att_layer = 0

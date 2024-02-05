@@ -167,12 +167,6 @@ def parse_args():
         help="The weight of prior preservation loss.",
     )
     parser.add_argument(
-        "--person_prior_loss_weight",
-        type=float,
-        default=1.0,
-        help="The weight of prior preservation loss.",
-    )
-    parser.add_argument(
         "--num_class_images",
         type=int,
         default=100,
@@ -387,6 +381,12 @@ def parse_args():
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
         ),
+    )
+    parser.add_argument(
+        "--wandb_mode",
+        type=str,
+        default="offline",
+        help="The mode to use for wandb logging.",
     )
     parser.add_argument(
         "--mixed_precision",
@@ -615,7 +615,8 @@ class DreamBoothDataset(Dataset):
 
         self.class_images_path = {}
         if self.class_data_root is not None and self.with_prior_preservation:
-            for class_name in self.initializer_tokens + [self.gender]:
+            # for class_name in self.initializer_tokens + [self.gender]:
+            for class_name in [self.gender]:
                 class_data_dir = Path(class_data_root) / self.sd_version / class_name
                 self.class_images_path[class_name] = list(class_data_dir.iterdir())
         else:
@@ -648,59 +649,56 @@ class DreamBoothDataset(Dataset):
             self.instance_descriptions[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
         ]
 
-        if not self.use_shape_desc:
-            descs_to_use = ["" for _ in descs_to_use]
-
+        # formulate the prompt and prompt_raw
         prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
-        with_classes = ['face', 'haircut', 'hair']
+        facial_classes = ['face', 'haircut', 'hair']
+        with_classes = [cls for cls in classes_to_use if cls in facial_classes]
+        wear_classes = [cls for cls in classes_to_use if cls not in facial_classes]
 
-        if not np.isin(with_classes, classes_to_use).any():
-            prompt = f"{prompt_head}, wearing " + " and ".join([
-                f"{placeholder_token} {desc} {class_token}"
-                for (placeholder_token, desc,
-                     class_token) in zip(tokens_to_use, descs_to_use, classes_to_use)
-            ]) + "."
-            prompt_raw = f"{prompt_head}, wearing " + " and ".join(classes_to_use) + "."
-        else:
-            prompt = f"{prompt_head}, "
-            prompt_raw = f"{prompt_head}, "
+        prompt_raw = prompt = f"{prompt_head}, "
 
-            # with {face} and {haircut} and {hair}
-            for name in with_classes:
-                if name in classes_to_use:
-                    idx = classes_to_use.index(name)
-                    prompt += f"{tokens_to_use[idx]} {descs_to_use[idx]} {name}, "
-                    prompt_raw += f"{name}, "
+        for class_token in with_classes:
+            idx = classes_to_use.index(class_token)
 
-            # wearing {garment} and {eyeglasses}
-            prompt += "wearing " + " and ".join([
-                f"{placeholder_token} {desc} {class_token}"
-                for (placeholder_token, desc,
-                     class_token) in zip(tokens_to_use, descs_to_use, classes_to_use)
-                if class_token not in with_classes
-            ]) + "."
-            prompt_raw += "wearing " + " and ".join([
-                f"{class_token}"
-                for class_token in classes_to_use if class_token not in with_classes
-            ]) + "."
+            if len(wear_classes) == 0 and with_classes.index(class_token) == len(with_classes) - 1:
+                ending = "."
+            else:
+                ending = ", "
 
-        prompt = prompt.replace(", wearing .", ".")
-        prompt = prompt.replace("  ", " ")
-        prompt_raw = prompt_raw.replace(", wearing .", ".")
-        prompt_raw = prompt_raw.replace("  ", " ")
+            if self.use_shape_desc:
+                prompt += f"{tokens_to_use[idx]} {descs_to_use[idx]} {class_token}{ending}"
+                prompt_raw += f"{descs_to_use[idx]} {class_token}{ending}"
+            else:
+                prompt += f"{tokens_to_use[idx]} {class_token}{ending}"
+                prompt_raw += f"{class_token}{ending}"
+
+        if len(wear_classes) > 0:
+            prompt += "wearing "
+            prompt_raw += "wearing "
+
+            for class_token in wear_classes:
+                idx = classes_to_use.index(class_token)
+
+                if wear_classes.index(class_token) < len(wear_classes) - 1:
+                    ending = ", and "
+                else:
+                    ending = "."
+                if self.use_shape_desc:
+                    prompt += f"{tokens_to_use[idx]} {descs_to_use[idx]} {class_token}{ending}"
+                    prompt_raw += f"{descs_to_use[idx]} {class_token}{ending}"
+                else:
+                    prompt += f"{tokens_to_use[idx]} {class_token}{ending}"
+                    prompt_raw += f"{class_token}{ending}"
 
         example["instance_images"] = self.instance_images[index % example_len]
         example["instance_masks"] = self.instance_masks[index % example_len][tokens_ids_to_use]
         example["token_ids"] = torch.tensor([
             self.placeholder_full.index(token) for token in tokens_to_use
         ])
-        example["full_masks"] = self.instance_masks[index %
-                                                    example_len].max(dim=0, keepdims=True).values
 
         if random.random() > self.flip_p:
             example["instance_images"] = TF.hflip(example["instance_images"])
             example["instance_masks"] = TF.hflip(example["instance_masks"])
-            example["full_masks"] = TF.hflip(example["full_masks"])
 
         example["instance_prompt_ids"] = self.tokenizer(
             prompt,
@@ -718,24 +716,12 @@ class DreamBoothDataset(Dataset):
             return_tensors="pt",
         ).input_ids
 
-        if self.class_data_root and self.with_prior_preservation:
+        example["class_ids"] = self.tokenizer(
+            " ".join(classes_to_use),
+            return_tensors="pt",
+        ).input_ids[0][1:-1]
 
-            # for assets
-            class_token = random.choice(classes_to_use)
-            class_image = Image.open(
-                self.class_images_path[class_token][index % self.num_class_images]
-            )
-            if not class_image.mode == "RGB":
-                class_image = class_image.convert("RGB")
-            example["class_images"] = self.image_transforms(class_image)
-            with_wear_class = f"wearing {class_token}" if class_token not in with_classes else f"{class_token}"
-            example["class_prompt_ids"] = self.tokenizer(
-                f"a high-resolution DSLR colored image of a {self.gender}, {with_wear_class}.",
-                truncation=True,
-                padding="max_length",
-                max_length=self.tokenizer.model_max_length,
-                return_tensors="pt",
-            ).input_ids
+        if self.class_data_root and self.with_prior_preservation:
 
             # for full human
             person_image = Image.open(
@@ -744,13 +730,6 @@ class DreamBoothDataset(Dataset):
             if not person_image.mode == "RGB":
                 person_image = person_image.convert("RGB")
             example["person_images"] = self.image_transforms(person_image)
-            example["person_prompt_ids"] = self.tokenizer(
-                f"a high-resolution DSLR colored image of a {self.gender} wearing daily clothes.",
-                truncation=True,
-                padding="max_length",
-                max_length=self.tokenizer.model_max_length,
-                return_tensors="pt",
-            ).input_ids
 
         return example
 
@@ -796,35 +775,32 @@ def padded_stack(
 def collate_fn(examples, with_prior_preservation=False):
     input_ids = [example["instance_prompt_ids"] for example in examples]
     raw_input_ids = [example["instance_prompt_ids_raw"] for example in examples]
+
     pixel_values = [example["instance_images"] for example in examples]
+
     masks = [example["instance_masks"] for example in examples]
-    full_masks = [example["full_masks"] for example in examples]
     token_ids = [example["token_ids"] for example in examples]
+    class_ids = [example["class_ids"] for example in examples]
 
     if with_prior_preservation:
-        input_ids = [example["person_prompt_ids"] for example in examples
-                    ] + [example["class_prompt_ids"] for example in examples] + input_ids
-        pixel_values = [example["person_images"] for example in examples
-                       ] + [example["class_images"] for example in examples] + pixel_values
-
-    else:
-        input_ids = [example["instance_prompt_ids_raw"] for example in examples] + input_ids
-        pixel_values = [example["instance_images"] for example in examples] + pixel_values
+        person_pixel_values = [example["person_images"] for example in examples]
+        input_ids = raw_input_ids + input_ids
+        pixel_values = person_pixel_values + pixel_values
 
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
     input_ids = torch.cat(input_ids, dim=0)
-    full_masks = torch.cat(full_masks, dim=0)
     masks = padded_stack(masks)
     token_ids = padded_stack(token_ids)
+    class_ids = padded_stack(class_ids)
 
     batch = {
         "input_ids": input_ids,
         "pixel_values": pixel_values,
         "instance_masks": masks,
-        "full_masks": full_masks,
         "token_ids": token_ids,
+        "class_ids": class_ids,
     }
     return batch
 
@@ -876,7 +852,7 @@ class SpatialDreambooth:
 
             wandb_init = {"wandb": {
                 "name": "multi-concept",
-                "mode": "offline",
+                "mode": self.args.wandb_mode,
             }}
 
         if (
@@ -929,13 +905,42 @@ class SpatialDreambooth:
             pipeline.set_progress_bar_config(disable=True)
             pipeline.to(self.accelerator.device)
 
+            facial_classes = ['face', 'haircut', 'hair']
+
             for class_name in self.args.initializer_tokens + [self.args.gender]:
 
                 prompt_head = f"a high-resolution DSLR colored image of a {self.args.gender}"
+                with_classes = [
+                    cls for cls in self.args.initializer_tokens if cls in facial_classes
+                ]
+                wear_classes = [
+                    cls for cls in self.args.initializer_tokens if cls not in facial_classes
+                ]
 
                 if class_name == self.args.gender:
-                    class_prompt = f"{prompt_head} wearing daily clothes."
-                elif class_name in ["face", "haircut", "hair"]:
+                    class_prompt = f"{prompt_head}, "
+
+                    for class_token in with_classes:
+                        if self.args.use_shape_description:
+                            class_prompt += f"{self.gpt4v_response[class_token]} {class_token}, "
+                        else:
+                            class_prompt += f"normal {class_token}, "
+
+                    if len(wear_classes) > 0:
+                        class_prompt += "wearing "
+
+                        for class_token in wear_classes:
+
+                            if wear_classes.index(class_token) < len(wear_classes) - 1:
+                                ending = ", and "
+                            else:
+                                ending = "."
+                            if self.args.use_shape_description:
+                                class_prompt += f"{self.gpt4v_response[class_token]} {class_token}{ending}"
+                            else:
+                                class_prompt += f"daily {class_token}{ending}"
+
+                elif class_name in facial_classes:
                     if self.args.use_shape_description:
                         class_prompt = f"{prompt_head}, {self.gpt4v_response[class_name]} {class_name}."
                     else:
@@ -1041,8 +1046,12 @@ class SpatialDreambooth:
         assert num_added_tokens == self.args.num_of_assets
         self.placeholder_token_ids = self.tokenizer.convert_tokens_to_ids(self.placeholder_tokens)
         self.text_encoder.resize_token_embeddings(len(self.tokenizer))
+
         self.args.instance_prompt = f"a high-resolution DSLR colored image of a {self.args.gender},  " + " and ".join(
-            self.placeholder_tokens
+            [
+                f"{token} {self.args.initializer_tokens[token_id]}"
+                for token_id, token in enumerate(self.placeholder_tokens)
+            ]
         )
 
         if len(self.args.initializer_tokens) > 0:
@@ -1412,6 +1421,7 @@ class SpatialDreambooth:
                     # Sample noise that we'll add to the latents
                     noise = torch.randn_like(latents)
                     bsz = latents.shape[0]
+
                     # Sample a random timestep for each image
                     timesteps = torch.randint(
                         0,
@@ -1441,121 +1451,82 @@ class SpatialDreambooth:
                             f"Unknown prediction type {self.noise_scheduler.config.prediction_type}"
                         )
 
+                    loss = 0.
+
                     if self.args.with_prior_preservation:
-                        # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
-                        model_pred_person_prior, model_pred_prior, model_pred = torch.chunk(
-                            model_pred, 3, dim=0
-                        )
-                        target_person_prior, target_prior, target = torch.chunk(target, 3, dim=0)
+                        # Chunk the noise and model_pred into two parts
+                        # compute the loss on each part separately.
 
-                        if self.args.apply_masked_loss:
-                            max_masks = torch.max(batch["instance_masks"], axis=1).values
+                        prior_pred, model_pred = torch.chunk(model_pred, 2, dim=0)
+                        prior_target, target = torch.chunk(target, 2, dim=0)
 
-                            # [1,1,64,64]
-                            downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
+                    if self.args.apply_masked_loss:
+                        max_masks = torch.max(batch["instance_masks"], dim=1).values
 
-                            # # with background
-                            # full_masks = batch["full_masks"]
-                            # downsampled_full_mask = F.interpolate(input=full_masks, size=(64, 64))
-                            # downsampled_mask = torch.max(
-                            #     torch.cat([downsampled_mask, 1.0 - downsampled_full_mask]),
-                            #     dim=1,
-                            #     keepdims=True
-                            # ).values
+                        # [1,1,64,64]
+                        downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
 
-                            # # full masked
-                            # model_pred_full = model_pred * downsampled_full_mask
-                            # target_full = target * downsampled_full_mask
+                        # partial masked
+                        model_pred = model_pred * downsampled_mask
+                        target = target * downsampled_mask
 
-                            # partial masked
-                            model_pred = model_pred * downsampled_mask
-                            target = target * downsampled_mask
-
-                        loss = 0.
-
-                        # full body prior
-                        full_loss = F.mse_loss(
-                            model_pred_person_prior.float(),
-                            target_person_prior.float(),
-                            reduction="mean"
-                        )
-
-                        loss += self.args.person_prior_loss_weight * full_loss
-                        logs["l_full"] = full_loss.detach().item()
-
-                        # Compute instance loss
-                        loss_inst = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                        loss += loss_inst
-                        logs["l_inst"] = loss_inst.detach().item()
-
-                        # # Compute full instance loss (harm the decomposition)
-                        # loss_inst_full = F.mse_loss(
-                        #     model_pred_full.float(), target_full.float(), reduction="mean"
-                        # )
-                        # logs["l_inst_F"] = loss_inst_full.detach().item()
-                        # loss += loss_inst_full
-
-                        # Compute prior loss
-                        prior_loss = F.mse_loss(
-                            model_pred_prior.float(),
-                            target_prior.float(),
-                            reduction="mean",
-                        )
-
-                        # Add the prior loss to the instance loss.
-                        loss += self.args.prior_loss_weight * prior_loss
-                        logs["l_prior"] = prior_loss.detach().item()
-                    else:
-
-                        model_pred_raw, model_pred = torch.chunk(model_pred, 2, dim=0)
-                        target_raw, target = torch.chunk(target, 2, dim=0)
-
-                        # Compute prior loss
-                        prior_loss = F.mse_loss(
-                            model_pred_raw.float().detach(),
-                            model_pred.float(),
-                            reduction="mean",
-                        )
-
-                        # Add the prior loss to the instance loss.
-                        loss = self.args.prior_loss_weight * prior_loss
-                        logs["l_prior"] = prior_loss.detach().item()
-
-                        if self.args.apply_masked_loss:
-                            max_masks = torch.max(batch["instance_masks"], axis=1).values
-                            downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
-                            model_pred = model_pred * downsampled_mask
-                            target = target * downsampled_mask
-
-                        loss_inst = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                        logs["l_inst"] = loss_inst.detach().item()
-                        loss += loss_inst
+                    # Compute instance loss
+                    loss_inst = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                    loss += loss_inst
+                    logs["l_inst"] = loss_inst.detach().item()
 
                     # Attention loss
                     if self.args.lambda_attention != 0:
                         attn_loss = 0
+                        cls_masks = []
+
                         for batch_idx in range(self.args.train_batch_size):
 
                             GT_masks = F.interpolate(
                                 input=batch["instance_masks"][batch_idx], size=(16, 16)
                             )
+
+                            if self.args.with_prior_preservation:
+                                curr_cond_batch_idx = self.args.train_batch_size + batch_idx
+
+                                agg_attn_prior = self.aggregate_attention(
+                                    res=16,
+                                    from_where=("up", "down"),
+                                    is_cross=True,
+                                    with_prior_preservation=self.args.with_prior_preservation,
+                                    select=batch_idx,
+                                )
+
+                            else:
+                                curr_cond_batch_idx = batch_idx
+
                             agg_attn = self.aggregate_attention(
                                 res=16,
                                 from_where=("up", "down"),
                                 is_cross=True,
-                                select=batch_idx,
+                                with_prior_preservation=self.args.with_prior_preservation,
+                                select=curr_cond_batch_idx,
                             )
 
-                            if self.args.with_prior_preservation:
-                                curr_cond_batch_idx = 2 * self.args.train_batch_size + batch_idx
-                            else:
-                                curr_cond_batch_idx = 1 * self.args.train_batch_size + batch_idx
-
                             valid_masks_num = len(GT_masks.sum(dim=(2, 3)).flatten().nonzero())
+
+                            cls_attn_masks = []
 
                             for mask_id in range(valid_masks_num):
                                 curr_placeholder_token_id = self.placeholder_token_ids[
                                     batch["token_ids"][batch_idx][mask_id]]
+                                curr_class_token_id = batch["class_ids"][batch_idx][mask_id]
+
+                                if self.args.with_prior_preservation:
+
+                                    # agg_attn [16,16,77]
+                                    class_idx = ((
+                                        batch["input_ids"][batch_idx] == curr_class_token_id
+                                    ).nonzero().item())
+
+                                    cls_attn_mask = agg_attn_prior[..., class_idx]
+                                    cls_attn_mask = (cls_attn_mask / cls_attn_mask.max())
+                                    cls_attn_masks.append(cls_attn_mask)
 
                                 asset_idx = ((
                                     batch["input_ids"][curr_cond_batch_idx] ==
@@ -1563,15 +1534,34 @@ class SpatialDreambooth:
                                 ).nonzero().item())
 
                                 # <asset>
-                                for offset in range(2):
-                                    asset_attn_mask = agg_attn[..., asset_idx + offset]
-                                    asset_attn_mask = (asset_attn_mask / asset_attn_mask.max())
+                                asset_attn_mask = agg_attn[..., asset_idx]
+                                asset_attn_mask = (asset_attn_mask / asset_attn_mask.max())
 
-                                    attn_loss += F.mse_loss(
-                                        GT_masks[mask_id, 0].float(),
-                                        asset_attn_mask.float(),
-                                        reduction="mean",
-                                    )
+                                attn_loss += F.mse_loss(
+                                    GT_masks[mask_id, 0].float(),
+                                    asset_attn_mask.float(),
+                                    reduction="mean",
+                                )
+
+                            if self.args.with_prior_preservation:
+                                max_cls_mask_all = torch.max(
+                                    torch.stack(cls_attn_masks), dim=0, keepdims=True
+                                ).values
+                                cls_masks.append(max_cls_mask_all)
+
+                        if self.args.with_prior_preservation:
+                            cls_mask = F.interpolate(torch.stack(cls_masks), size=(64, 64))
+                            prior_pred = prior_pred * cls_mask
+                            prior_target = prior_target * cls_mask
+
+                            prior_loss = F.mse_loss(
+                                prior_pred.float(),
+                                prior_target.float(),
+                                reduction="mean",
+                            ) * self.args.prior_loss_weight / self.args.train_batch_size
+
+                            loss += prior_loss
+                            logs["l_prior"] = prior_loss.detach().item()
 
                         attn_loss = self.args.lambda_attention * (
                             attn_loss / self.args.train_batch_size
@@ -1625,27 +1615,66 @@ class SpatialDreambooth:
                                                           (last_sentence != 49407)]
                             last_sentence = self.tokenizer.decode(last_sentence)
 
-                            self.save_cross_attention_vis(
+                            step_attn_vis = self.save_cross_attention_vis(
                                 last_sentence,
                                 batch_pixels=batch["pixel_values"]
                                 [curr_cond_batch_idx].detach().cpu(),
                                 attention_maps=agg_attn.detach().cpu(),
-                                path=os.path.join(img_logs_path, f"{global_step:05}_step_attn.jpg"),
+                                path=os.path.join(
+                                    img_logs_path, f"{global_step:05}_step_raw_attn.jpg"
+                                ),
                             )
+
+                            self.accelerator.trackers[0].log({
+                                "step_attn":
+                                [wandb.Image(step_attn_vis, caption=f"{last_sentence}")]
+                            })
+
+                            if self.args.with_prior_preservation:
+
+                                last_sentence = batch["input_ids"][batch_idx]
+                                last_sentence = last_sentence[(last_sentence != 0) &
+                                                              (last_sentence != 49406) &
+                                                              (last_sentence != 49407)]
+                                last_sentence = self.tokenizer.decode(last_sentence)
+
+                                prior_attn_vis = self.save_cross_attention_vis(
+                                    last_sentence,
+                                    batch_pixels=batch["pixel_values"][batch_idx].detach().cpu(),
+                                    attention_maps=agg_attn_prior.detach().cpu(),
+                                    path=os.path.join(
+                                        img_logs_path, f"{global_step:05}_step_prior_attn.jpg"
+                                    ),
+                                )
+
+                                self.accelerator.trackers[0].log({
+                                    "prior_attn":
+                                    [wandb.Image(prior_attn_vis, caption=f"{last_sentence}")]
+                                })
 
                         self.controller.cur_step = 0
                         self.controller.attention_store = {}
 
                         full_rgb = self.perform_full_inference()
                         full_agg_attn = self.aggregate_attention(
-                            res=16, from_where=("up", "down"), is_cross=True, select=0
+                            res=16,
+                            from_where=("up", "down"),
+                            is_cross=True,
+                            with_prior_preservation=False,
+                            select=0
                         )
-                        self.save_cross_attention_vis(
+                        full_attn_vis = self.save_cross_attention_vis(
                             self.args.instance_prompt,
                             batch_pixels=full_rgb,
                             attention_maps=full_agg_attn.detach().cpu(),
                             path=os.path.join(img_logs_path, f"{global_step:05}_full_attn.jpg"),
                         )
+
+                        self.accelerator.trackers[0].log({
+                            "prior_attn":
+                            [wandb.Image(full_attn_vis, caption=f"{self.args.instance_prompt}")]
+                        })
+
                         self.controller.cur_step = 0
                         self.controller.attention_store = {}
 
@@ -1725,16 +1754,18 @@ class SpatialDreambooth:
         }
         return average_attention
 
-    def aggregate_attention(self, res: int, from_where: List[str], is_cross: bool, select: int):
+    def aggregate_attention(
+        self, res: int, from_where: List[str], is_cross: bool, with_prior_preservation: bool,
+        select: int
+    ):
         out = []
         attention_maps = self.get_average_attention()
         num_pixels = res**2
+        batch_size = self.args.train_batch_size * 2 if with_prior_preservation else self.args.train_batch_size
         for location in from_where:
             for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
                 if item.shape[1] == num_pixels:
-                    cross_maps = item.reshape(
-                        self.args.train_batch_size, -1, res, res, item.shape[-1]
-                    )[select]
+                    cross_maps = item.reshape(batch_size, -1, res, res, item.shape[-1])[select]
                     out.append(cross_maps)
         out = torch.cat(out, dim=0)
         out = out.sum(0) / out.shape[0]
@@ -1826,11 +1857,9 @@ class SpatialDreambooth:
 
         vis = ptp_utils.view_images(np.stack(images, axis=0))
 
-        self.accelerator.trackers[0].log({
-            "cross_attention_vis": [wandb.Image(vis, caption=f"{prompt}")]
-        })
-
         vis.save(path)
+
+        return vis
 
 
 class P2PCrossAttnProcessor:
