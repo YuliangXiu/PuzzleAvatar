@@ -32,13 +32,15 @@ class BreakASceneInference:
         self.prompt_words = None
         self.classes = None
         self.placeholder_tokens = None
+        self.descs = None
         self.gender = None
 
         self._parse_args()
-        self._load_prompts()
+        self._load_meta_data()
+        self.construct_prompt()
         self._load_pipeline()
 
-    def _load_prompts(self):
+    def _load_meta_data(self):
 
         with open(os.path.join(self.args.instance_dir, 'gpt4v_response.json'), 'r') as f:
             gpt4v_response = json.load(f)
@@ -52,17 +54,7 @@ class BreakASceneInference:
                     self.classes.remove(key)
 
             self.placeholder_tokens = [f"<asset{i}>" for i in range(len(self.classes))]
-
-            if self.args.use_shape_description:
-                self.prompt_words = [
-                    f"{self.placeholder_tokens[i]} {gpt4v_response[self.classes[i]]} {self.classes[i]}"
-                    for i in range(len(self.classes))
-                ]
-            else:
-                self.prompt_words = [
-                    f"{self.placeholder_tokens[i]} {self.classes[i]}"
-                    for i in range(len(self.classes))
-                ]
+            self.descs = [gpt4v_response[cls] for cls in self.classes]
 
     def _parse_args(self):
         parser = argparse.ArgumentParser()
@@ -172,6 +164,51 @@ class BreakASceneInference:
 
             cur_size += batch_size
 
+    def construct_prompt(self, classes_to_use, tokens_to_use, descs_to_use):
+
+        # formulate the prompt and prompt_raw
+        prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
+        facial_classes = ['face', 'haircut', 'hair']
+        with_classes = [cls for cls in classes_to_use if cls in facial_classes]
+        wear_classes = [cls for cls in classes_to_use if cls not in facial_classes]
+
+        prompt_raw = prompt = f"{prompt_head}, "
+
+        for class_token in with_classes:
+            idx = classes_to_use.index(class_token)
+
+            if len(wear_classes) == 0 and with_classes.index(class_token) == len(with_classes) - 1:
+                ending = "."
+            else:
+                ending = ", "
+
+            if self.args.use_shape_description:
+                prompt += f"{tokens_to_use[idx]} {descs_to_use[idx]} {class_token}{ending}"
+                prompt_raw += f"{descs_to_use[idx]} {class_token}{ending}"
+            else:
+                prompt += f"{tokens_to_use[idx]} {class_token}{ending}"
+                prompt_raw += f"{class_token}{ending}"
+
+        if len(wear_classes) > 0:
+            prompt += "wearing "
+            prompt_raw += "wearing "
+
+            for class_token in wear_classes:
+                idx = classes_to_use.index(class_token)
+
+                if wear_classes.index(class_token) < len(wear_classes) - 1:
+                    ending = ", and "
+                else:
+                    ending = "."
+                if self.args.use_shape_description:
+                    prompt += f"{tokens_to_use[idx]} {descs_to_use[idx]} {class_token}{ending}"
+                    prompt_raw += f"{descs_to_use[idx]} {class_token}{ending}"
+                else:
+                    prompt += f"{tokens_to_use[idx]} {class_token}{ending}"
+                    prompt_raw += f"{class_token}{ending}"
+
+        return prompt, prompt_raw
+
 
 if __name__ == "__main__":
 
@@ -189,42 +226,19 @@ if __name__ == "__main__":
         tokens_ids_to_use = sorted(
             random.sample(range(len(break_a_scene_inference.classes)), k=num_of_tokens)
         )
-        prompt_head = f"a high-resolution DSLR colored image of a {break_a_scene_inference.gender}, "
-        prompt_head_raw = f"a high-resolution DSLR colored image of a {break_a_scene_inference.gender}, "
 
-        tokens.append(
-            "_".join([f"{id}_{break_a_scene_inference.classes[id]}" for id in tokens_ids_to_use])
-        )
-        tokens.append(
-            "_".join([f"{id}_{break_a_scene_inference.classes[id]}"
-                      for id in tokens_ids_to_use]) + "_raw"
+        prompt, prompt_raw = break_a_scene_inference.construct_prompt(
+            break_a_scene_inference.classes[tokens_ids_to_use],
+            break_a_scene_inference.placeholder_tokens[tokens_ids_to_use],
+            break_a_scene_inference.prompt_words[tokens_ids_to_use]
         )
 
-        if not np.isin(with_ids, tokens_ids_to_use).any():
-            prompt_garments = "wearing " + " and ".join([
-                break_a_scene_inference.prompt_words[i] for i in tokens_ids_to_use
-            ]) + " at the beach."
-            prompt_garments_raw = "wearing " + " and ".join([
-                break_a_scene_inference.classes[i] for i in tokens_ids_to_use
-            ]) + " at the beach."
-        else:
-            for with_id in with_ids:
-                if with_id in tokens_ids_to_use:
-                    prompt_head += f"{break_a_scene_inference.prompt_words[with_id]}, "
-                    prompt_head_raw += f"{break_a_scene_inference.classes[with_id]}, "
+        tokens.append(
+            f"img{i:02d}_" + "_".join(break_a_scene_inference.classes[tokens_ids_to_use]) + ".png"
+        )
 
-            prompt_garments = "wearing " + " and ".join([
-                break_a_scene_inference.prompt_words[id]
-                for id in tokens_ids_to_use if id not in with_ids
-            ]) + " at the beach."
-
-            prompt_garments_raw = "wearing " + " and ".join([
-                break_a_scene_inference.classes[id]
-                for id in tokens_ids_to_use if id not in with_ids
-            ]) + " at the beach."
-
-        prompts.append(f"{prompt_head}{prompt_garments}".replace(", wearing .", "."))
-        prompts.append(f"{prompt_head_raw}{prompt_garments_raw}".replace(", wearing .", "."))
+        prompts.append(prompt)
+        prompts.append(prompt_raw)
 
     print(prompts)
 

@@ -19,12 +19,11 @@ import glob
 import hashlib
 import itertools
 import json
-import sys
 import logging
 import math
 import os
-import wandb
 import random
+import sys
 import warnings
 from pathlib import Path
 from typing import List, Optional
@@ -59,9 +58,11 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 
+import wandb
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "../thirdparties/peft/src"))
 
-from peft import LoraConfig, BOFTConfig, get_peft_model
+from peft import BOFTConfig, LoraConfig, get_peft_model
 
 check_min_version("0.12.0")
 
@@ -74,6 +75,8 @@ UNET_TARGET_MODULES = [
 TEXT_ENCODER_TARGET_MODULES = [
     "embed_tokens", "q_proj", "k_proj", "v_proj", "out_proj", "mlp.fc1", "mlp.fc2"
 ]
+
+negative_prompt = 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy, shadow, worst quality, jpeg artifacts, poorly drawn, dehydrated, noisy, poorly drawn, bad proportions, bad anatomy, bad lighting, bad composition, bad framing, fused fingers, noisy, duplicate characters'
 
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
@@ -167,6 +170,12 @@ def parse_args():
         help="The weight of prior preservation loss.",
     )
     parser.add_argument(
+        "--mask_loss_weight",
+        type=float,
+        default=1.0,
+        help="The weight of prior preservation loss.",
+    )
+    parser.add_argument(
         "--num_class_images",
         type=int,
         default=100,
@@ -181,11 +190,11 @@ def parse_args():
         default="outputs",
         help="The output directory where the model predictions and checkpoints will be written.",
     )
-    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument("--seed", type=int, default=1993, help="A seed for reproducible training.")
     parser.add_argument(
         "--resolution",
         type=int,
-        default=512,
+        default=768,
         help=(
             "The resolution for input images, all the images in the train/validation dataset will be resized to this"
             " resolution"
@@ -479,6 +488,12 @@ def parse_args():
         dest="apply_masked_loss"
     )
     parser.add_argument(
+        "--do_not_apply_masked_prior",
+        action="store_false",
+        help="Use masked loss instead of standard epsilon prediciton loss",
+        dest="apply_masked_prior"
+    )
+    parser.add_argument(
         "--log_checkpoints",
         action="store_true",
         help="Indicator to log intermediate model checkpoints",
@@ -522,6 +537,16 @@ def parse_args():
             warnings.warn("You need not use --class_prompt without --with_prior_preservation.")
 
     return args, gpt4v_response
+
+
+def clean_decode_prompt(prompt, tokenizer, remove_blank=False):
+
+    prompt = prompt[(prompt != 0) & (prompt != 49406) & (prompt != 49407)]
+    prompt = tokenizer.decode(prompt)
+    if remove_blank:
+        prompt = prompt.replace(" ", "")
+
+    return prompt
 
 
 class DreamBoothDataset(Dataset):
@@ -615,10 +640,8 @@ class DreamBoothDataset(Dataset):
 
         self.class_images_path = {}
         if self.class_data_root is not None and self.with_prior_preservation:
-            # for class_name in self.initializer_tokens + [self.gender]:
-            for class_name in [self.gender]:
-                class_data_dir = Path(class_data_root) / self.sd_version / class_name
-                self.class_images_path[class_name] = list(class_data_dir.iterdir())
+            class_data_dir = Path(class_data_root) / self.sd_version / self.gender
+            self.class_images_path[self.gender] = list(class_data_dir.iterdir())
         else:
             self.class_data_root = None
 
@@ -628,26 +651,7 @@ class DreamBoothDataset(Dataset):
 
         return self._length
 
-    def __getitem__(self, index):
-
-        example = {}
-        example_len = len(self.instance_images)
-
-        # instance_masks, instance_images, placeholder_tokens are all lists
-        num_of_tokens = random.randrange(1, len(self.placeholder_tokens[index % example_len]) + 1)
-        tokens_ids_to_use = random.sample(
-            range(len(self.placeholder_tokens[index % example_len])), k=num_of_tokens
-        )
-        tokens_to_use = [
-            self.placeholder_tokens[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
-        ]
-        classes_to_use = [
-            self.class_tokens[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
-        ]
-
-        descs_to_use = [
-            self.instance_descriptions[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
-        ]
+    def construct_prompt(self, classes_to_use, tokens_to_use, descs_to_use):
 
         # formulate the prompt and prompt_raw
         prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
@@ -690,6 +694,47 @@ class DreamBoothDataset(Dataset):
                     prompt += f"{tokens_to_use[idx]} {class_token}{ending}"
                     prompt_raw += f"{class_token}{ending}"
 
+        return prompt, prompt_raw
+
+    def tokener(self, prompt, mode='padding'):
+
+        if mode == 'padding':
+            return self.tokenizer(
+                prompt,
+                truncation=True,
+                padding="max_length",
+                max_length=self.tokenizer.model_max_length,
+                return_tensors="pt",
+            ).input_ids
+        else:
+            return self.tokenizer(
+                prompt,
+                return_tensors="pt",
+            ).input_ids[0][1:-1]
+
+    def __getitem__(self, index):
+
+        example = {}
+        example_len = len(self.instance_images)
+
+        # instance_masks, instance_images, placeholder_tokens are all lists
+        num_of_tokens = random.randrange(1, len(self.placeholder_tokens[index % example_len]) + 1)
+        tokens_ids_to_use = random.sample(
+            range(len(self.placeholder_tokens[index % example_len])), k=num_of_tokens
+        )
+        tokens_to_use = [
+            self.placeholder_tokens[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
+        ]
+        classes_to_use = [
+            self.class_tokens[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
+        ]
+
+        descs_to_use = [
+            self.instance_descriptions[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
+        ]
+
+        prompt, prompt_raw = self.construct_prompt(classes_to_use, tokens_to_use, descs_to_use)
+
         example["instance_images"] = self.instance_images[index % example_len]
         example["instance_masks"] = self.instance_masks[index % example_len][tokens_ids_to_use]
         example["token_ids"] = torch.tensor([
@@ -700,26 +745,9 @@ class DreamBoothDataset(Dataset):
             example["instance_images"] = TF.hflip(example["instance_images"])
             example["instance_masks"] = TF.hflip(example["instance_masks"])
 
-        example["instance_prompt_ids"] = self.tokenizer(
-            prompt,
-            truncation=True,
-            padding="max_length",
-            max_length=self.tokenizer.model_max_length,
-            return_tensors="pt",
-        ).input_ids
-
-        example["instance_prompt_ids_raw"] = self.tokenizer(
-            prompt_raw,
-            truncation=True,
-            padding="max_length",
-            max_length=self.tokenizer.model_max_length,
-            return_tensors="pt",
-        ).input_ids
-
-        example["class_ids"] = self.tokenizer(
-            " ".join(classes_to_use),
-            return_tensors="pt",
-        ).input_ids[0][1:-1]
+        example["instance_prompt_ids"] = self.tokener(prompt)
+        example["instance_prompt_ids_raw"] = self.tokener(prompt_raw)
+        example["class_ids"] = self.tokener(" ".join(classes_to_use), "non_padding")
 
         if self.class_data_root and self.with_prior_preservation:
 
@@ -730,6 +758,11 @@ class DreamBoothDataset(Dataset):
             if not person_image.mode == "RGB":
                 person_image = person_image.convert("RGB")
             example["person_images"] = self.image_transforms(person_image)
+            example["person_filename"] = self.tokener(
+                os.path.basename(
+                    str(self.class_images_path[self.gender][index % self.num_class_images])
+                )
+            )
 
         return example
 
@@ -782,10 +815,14 @@ def collate_fn(examples, with_prior_preservation=False):
     token_ids = [example["token_ids"] for example in examples]
     class_ids = [example["class_ids"] for example in examples]
 
+    batch = {}
+
     if with_prior_preservation:
         person_pixel_values = [example["person_images"] for example in examples]
         input_ids = raw_input_ids + input_ids
         pixel_values = person_pixel_values + pixel_values
+        batch["person_filenames"] = torch.cat([example["person_filename"] for example in examples],
+                                              dim=0)
 
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
@@ -795,19 +832,54 @@ def collate_fn(examples, with_prior_preservation=False):
     token_ids = padded_stack(token_ids)
     class_ids = padded_stack(class_ids)
 
-    batch = {
+    batch.update({
         "input_ids": input_ids,
         "pixel_values": pixel_values,
         "instance_masks": masks,
         "token_ids": token_ids,
         "class_ids": class_ids,
-    }
+    })
+
     return batch
+
+
+def construct_prior_prompt(gender, all_classes, gpt4v_dict, use_shape_desc):
+
+    facial_classes = ['face', 'haircut', 'hair']
+
+    prompt_head = f"a high-resolution DSLR colored image of a {gender}"
+    with_classes = [cls for cls in all_classes if cls in facial_classes]
+    wear_classes = [cls for cls in all_classes if cls not in facial_classes]
+
+    class_prompt = f"{prompt_head}, "
+
+    for class_token in with_classes:
+        if use_shape_desc:
+            class_prompt += f"{gpt4v_dict[class_token]} {class_token}, "
+        else:
+            class_prompt += f"normal {class_token}, "
+
+    if len(wear_classes) > 0:
+        class_prompt += "wearing "
+
+        for class_token in wear_classes:
+
+            if wear_classes.index(class_token) < len(wear_classes) - 1:
+                ending = ", and "
+            else:
+                ending = "."
+            if use_shape_desc:
+                class_prompt += f"{gpt4v_dict[class_token]} {class_token}{ending}"
+            else:
+                class_prompt += f"daily {class_token}{ending}"
+
+    return class_prompt
 
 
 class PromptDataset(Dataset):
     "A simple dataset to prepare the prompts to generate class images on multiple GPUs."
-    def __init__(self, prompt, num_samples):
+    def __init__(self, tokenizer, prompt, num_samples):
+        self.tokenizer = tokenizer
         self.prompt = prompt
         self.num_samples = num_samples
 
@@ -818,6 +890,13 @@ class PromptDataset(Dataset):
         example = {}
         example["prompt"] = self.prompt
         example["index"] = index
+        example["prompt_ids"] = self.tokenizer(
+            self.prompt,
+            truncation=True,
+            padding="max_length",
+            max_length=self.tokenizer.model_max_length,
+            return_tensors="pt",
+        ).input_ids[0]
         return example
 
 
@@ -836,6 +915,9 @@ def get_full_repo_name(
 class SpatialDreambooth:
     def __init__(self):
         self.args, self.gpt4v_response = parse_args()
+        self.attn_mask_cache = {}
+        self.class_ids = []
+
         self.main()
 
     def main(self):
@@ -882,118 +964,6 @@ class SpatialDreambooth:
         # If passed along, set the training seed now.
         if self.args.seed is not None:
             set_seed(self.args.seed)
-
-        # Generate class images if prior preservation is enabled.
-        if self.args.with_prior_preservation:
-
-            torch_dtype = (
-                torch.float16 if self.accelerator.device.type == "cuda" else torch.float32
-            )
-            if self.args.prior_generation_precision == "fp32":
-                torch_dtype = torch.float32
-            elif self.args.prior_generation_precision == "fp16":
-                torch_dtype = torch.float16
-            elif self.args.prior_generation_precision == "bf16":
-                torch_dtype = torch.bfloat16
-            pipeline = DiffusionPipeline.from_pretrained(
-                self.args.pretrained_model_name_or_path,
-                torch_dtype=torch_dtype,
-                safety_checker=None,
-                revision=self.args.revision,
-            )
-            pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
-            pipeline.set_progress_bar_config(disable=True)
-            pipeline.to(self.accelerator.device)
-
-            facial_classes = ['face', 'haircut', 'hair']
-
-            for class_name in self.args.initializer_tokens + [self.args.gender]:
-
-                prompt_head = f"a high-resolution DSLR colored image of a {self.args.gender}"
-                with_classes = [
-                    cls for cls in self.args.initializer_tokens if cls in facial_classes
-                ]
-                wear_classes = [
-                    cls for cls in self.args.initializer_tokens if cls not in facial_classes
-                ]
-
-                if class_name == self.args.gender:
-                    class_prompt = f"{prompt_head}, "
-
-                    for class_token in with_classes:
-                        if self.args.use_shape_description:
-                            class_prompt += f"{self.gpt4v_response[class_token]} {class_token}, "
-                        else:
-                            class_prompt += f"normal {class_token}, "
-
-                    if len(wear_classes) > 0:
-                        class_prompt += "wearing "
-
-                        for class_token in wear_classes:
-
-                            if wear_classes.index(class_token) < len(wear_classes) - 1:
-                                ending = ", and "
-                            else:
-                                ending = "."
-                            if self.args.use_shape_description:
-                                class_prompt += f"{self.gpt4v_response[class_token]} {class_token}{ending}"
-                            else:
-                                class_prompt += f"daily {class_token}{ending}"
-
-                elif class_name in facial_classes:
-                    if self.args.use_shape_description:
-                        class_prompt = f"{prompt_head}, {self.gpt4v_response[class_name]} {class_name}."
-                    else:
-                        class_prompt = f"{prompt_head}, {class_name}."
-                else:
-                    if self.args.use_shape_description:
-                        class_prompt = f"{prompt_head}, wearing {self.gpt4v_response[class_name]} {class_name}."
-                    else:
-                        class_prompt = f"{prompt_head}, wearing {class_name}."
-
-                pretrained_name = self.args.pretrained_model_name_or_path.split("/")[-1]
-                class_images_dir = Path(self.args.class_data_dir) / pretrained_name / class_name
-
-                if not class_images_dir.exists():
-                    class_images_dir.mkdir(parents=True)
-                cur_class_images = len(list(class_images_dir.iterdir()))
-
-                if cur_class_images < self.args.num_class_images:
-
-                    num_new_images = self.args.num_class_images - cur_class_images
-                    logger.info(f"Number of class images to sample: {num_new_images}.")
-
-                    sample_dataset = PromptDataset(class_prompt, num_new_images)
-                    sample_dataloader = torch.utils.data.DataLoader(
-                        sample_dataset, batch_size=self.args.sample_batch_size
-                    )
-
-                    sample_dataloader = self.accelerator.prepare(sample_dataloader)
-
-                    for example in tqdm(
-                        sample_dataloader,
-                        desc=f"Generating {class_name} images",
-                        disable=not self.accelerator.is_local_main_process,
-                    ):
-
-                        negative_prompt = 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy, shadow, worst quality, jpeg artifacts, poorly drawn, dehydrated, noisy, poorly drawn, bad proportions, bad anatomy, bad lighting, bad composition, bad framing, fused fingers, noisy, duplicate characters'
-
-                        images = pipeline(
-                            example["prompt"],
-                            negative_prompt=[negative_prompt] * len(example["prompt"])
-                        ).images
-
-                        for i, image in enumerate(images):
-                            hash_image = hashlib.sha1(image.tobytes()).hexdigest()
-                            image_filename = (
-                                class_images_dir /
-                                f"{example['index'][i] + cur_class_images}-{hash_image}.jpg"
-                            )
-                            image.save(image_filename)
-
-            del pipeline
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
         # Handle the repository creation
         if self.accelerator.is_main_process:
@@ -1047,12 +1017,7 @@ class SpatialDreambooth:
         self.placeholder_token_ids = self.tokenizer.convert_tokens_to_ids(self.placeholder_tokens)
         self.text_encoder.resize_token_embeddings(len(self.tokenizer))
 
-        self.args.instance_prompt = f"a high-resolution DSLR colored image of a {self.args.gender},  " + " and ".join(
-            [
-                f"{token} {self.args.initializer_tokens[token_id]}"
-                for token_id, token in enumerate(self.placeholder_tokens)
-            ]
-        )
+        self.class_ids = self.tokenizer(" ".join(self.args.initializer_tokens), ).input_ids[1:-1]
 
         if len(self.args.initializer_tokens) > 0:
             # Use initializer tokens
@@ -1081,6 +1046,23 @@ class SpatialDreambooth:
         self.text_encoder.text_model.encoder.requires_grad_(False)
         self.text_encoder.text_model.final_layer_norm.requires_grad_(False)
         self.text_encoder.text_model.embeddings.position_embedding.requires_grad_(False)
+
+        (
+            self.unet,
+            self.text_encoder,
+            self.tokenizer,
+        ) = self.accelerator.prepare(self.unet, self.text_encoder, self.tokenizer)
+
+        self.weight_dtype = torch.float32
+        if self.accelerator.mixed_precision == "fp16":
+            self.weight_dtype = torch.float16
+        elif self.accelerator.mixed_precision == "bf16":
+            self.weight_dtype = torch.bfloat16
+
+        # Move unet, vae and text_encoder to device and cast to weight_dtype
+        self.unet.to(self.accelerator.device, dtype=self.weight_dtype)
+        self.vae.to(self.accelerator.device, dtype=self.weight_dtype)
+        self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
 
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
@@ -1124,6 +1106,120 @@ class SpatialDreambooth:
             eps=self.args.adam_epsilon,
         )
 
+        # Create attention controller
+        self.controller = AttentionStore()
+        self.register_attention_control(self.controller)
+
+        pretrained_name = self.args.pretrained_model_name_or_path.split("/")[-1]
+        cached_masks_path = Path(self.args.class_data_dir, f"{pretrained_name}/attn_masks_cache.pt")
+
+        # Generate class images if prior preservation is enabled.
+
+        with torch.no_grad():
+            if self.args.with_prior_preservation:
+
+                if cached_masks_path.exists():
+                    self.attn_mask_cache = torch.load(cached_masks_path)
+                else:
+
+                    # generate attn_mask_cache file
+
+                    pipeline = DiffusionPipeline.from_pretrained(
+                        self.args.pretrained_model_name_or_path,
+                        torch_dtype=self.weight_dtype,
+                        safety_checker=None,
+                        revision=self.args.revision,
+                    )
+                    self.unet.eval()
+                    pipeline.unet = self.unet
+                    pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+                    pipeline.set_progress_bar_config(disable=True)
+                    pipeline.to(self.accelerator.device)
+
+                    for class_name in self.args.initializer_tokens + [self.args.gender]:
+
+                        class_prompt = construct_prior_prompt(
+                            self.args.gender,
+                            self.args.initializer_tokens,
+                            self.gpt4v_response,
+                            self.args.use_shape_description,
+                        )
+
+                        class_images_dir = Path(
+                            self.args.class_data_dir
+                        ) / pretrained_name / class_name
+
+                        if not class_images_dir.exists():
+                            class_images_dir.mkdir(parents=True)
+                        cur_class_images = len(list(class_images_dir.iterdir()))
+
+                        if cur_class_images < self.args.num_class_images:
+
+                            num_new_images = self.args.num_class_images - cur_class_images
+                            logger.info(f"Number of class images to sample: {num_new_images}.")
+
+                            sample_dataset = PromptDataset(
+                                self.tokenizer, class_prompt, num_new_images
+                            )
+                            sample_dataloader = torch.utils.data.DataLoader(
+                                sample_dataset, batch_size=self.args.sample_batch_size
+                            )
+
+                            sample_dataloader = self.accelerator.prepare(sample_dataloader)
+
+                            for example in tqdm(
+                                sample_dataloader,
+                                desc=f"Generating {class_name} images",
+                                disable=not self.accelerator.is_local_main_process,
+                            ):
+
+                                images = pipeline(
+                                    example["prompt"],
+                                    negative_prompt=[negative_prompt] * len(example["prompt"])
+                                ).images
+
+                                for batch_idx in range(self.args.sample_batch_size):
+
+                                    hash_image = hashlib.sha1(images[batch_idx].tobytes()
+                                                             ).hexdigest()
+                                    base_name = f"{example['index'][batch_idx] + cur_class_images}-{hash_image}.jpg"
+                                    image_filename = (class_images_dir / base_name)
+                                    images[batch_idx].save(image_filename)
+                                    self.attn_mask_cache[base_name] = {}
+
+                                    agg_attn_pre = self.aggregate_attention(
+                                        res=24,
+                                        from_where=("up", "down"),
+                                        is_cross=True,
+                                        select=batch_idx,
+                                        batch_size=self.args.sample_batch_size,
+                                    )
+
+                                    for class_token_id in self.class_ids:
+
+                                        # agg_attn [24,24,77]
+                                        class_idx = ((
+                                            example["prompt_ids"][batch_idx] == class_token_id
+                                        ).nonzero().item())
+
+                                        cls_attn_mask = agg_attn_pre[..., class_idx]
+                                        cls_attn_mask = (cls_attn_mask / cls_attn_mask.max())
+                                        self.attn_mask_cache[base_name][class_token_id
+                                                                       ] = cls_attn_mask
+
+                                self.controller.attention_store = {}
+                                self.controller.cur_step = 0
+
+                    del pipeline
+                    del sample_dataset
+                    del sample_dataloader
+                    del agg_attn_pre
+
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+                    torch.save(self.attn_mask_cache, cached_masks_path)
+
         # Dataset and DataLoaders creation:
         train_dataset = DreamBoothDataset(
             instance_data_root=self.args.instance_data_dir,
@@ -1139,6 +1235,11 @@ class SpatialDreambooth:
             size=self.args.resolution,
             center_crop=self.args.center_crop,
             sd_version=self.args.pretrained_model_name_or_path.split("/")[-1],
+        )
+
+        self.args.instance_prompt, self.args.instance_prompt_raw = train_dataset.construct_prompt(
+            self.args.initializer_tokens, self.placeholder_tokens,
+            [self.gpt4v_response[cls_name] for cls_name in self.args.initializer_tokens]
         )
 
         logger.info(f"Placeholder Tokens: {self.placeholder_tokens}")
@@ -1171,25 +1272,10 @@ class SpatialDreambooth:
         )
 
         (
-            self.unet,
-            self.text_encoder,
             optimizer,
             train_dataloader,
             lr_scheduler,
-        ) = self.accelerator.prepare(
-            self.unet, self.text_encoder, optimizer, train_dataloader, lr_scheduler
-        )
-
-        self.weight_dtype = torch.float32
-        if self.accelerator.mixed_precision == "fp16":
-            self.weight_dtype = torch.float16
-        elif self.accelerator.mixed_precision == "bf16":
-            self.weight_dtype = torch.bfloat16
-
-        # Move unet, vae and text_encoder to device and cast to weight_dtype
-        self.unet.to(self.accelerator.device, dtype=self.weight_dtype)
-        self.vae.to(self.accelerator.device, dtype=self.weight_dtype)
-        self.text_encoder.to(self.accelerator.device, dtype=self.weight_dtype)
+        ) = self.accelerator.prepare(optimizer, train_dataloader, lr_scheduler)
 
         low_precision_error_string = (
             "Please make sure to always have all model weights in full float32 precision when starting training - even if"
@@ -1229,7 +1315,7 @@ class SpatialDreambooth:
         # The trackers initializes automatically on the main process.
         if self.accelerator.is_main_process:
             self.accelerator.init_trackers(
-                "dreambooth", config=vars(self.args), init_kwargs=wandb_init
+                "dreambooth-raw", config=vars(self.args), init_kwargs=wandb_init
             )
 
         # Train
@@ -1291,10 +1377,6 @@ class SpatialDreambooth:
                                          ).get_input_embeddings().weight.data.clone()
         )
 
-        # Create attention controller
-        self.controller = AttentionStore()
-        self.register_attention_control(self.controller)
-
         for epoch in range(first_epoch, self.args.num_train_epochs):
 
             self.unet.train()
@@ -1322,6 +1404,7 @@ class SpatialDreambooth:
 
                             unet_config = LoraConfig(
                                 r=self.args.lora_r,
+                                use_rslora=True,
                                 lora_alpha=self.args.lora_r,
                                 init_lora_weights="gaussian",
                                 target_modules=UNET_TARGET_MODULES,
@@ -1352,6 +1435,7 @@ class SpatialDreambooth:
                             elif self.args.use_peft == "lora":
                                 text_config = LoraConfig(
                                     r=self.args.lora_r,
+                                    use_rslora=True,
                                     lora_alpha=self.args.lora_r,
                                     init_lora_weights="gaussian",
                                     target_modules=TEXT_ENCODER_TARGET_MODULES,
@@ -1463,8 +1547,8 @@ class SpatialDreambooth:
                     if self.args.apply_masked_loss:
                         max_masks = torch.max(batch["instance_masks"], dim=1).values
 
-                        # [1,1,64,64]
-                        downsampled_mask = F.interpolate(input=max_masks, size=(64, 64))
+                        # [1,1,96,96]
+                        downsampled_mask = F.interpolate(input=max_masks, size=(96, 96))
 
                         # partial masked
                         model_pred = model_pred * downsampled_mask
@@ -1479,38 +1563,42 @@ class SpatialDreambooth:
                     if self.args.lambda_attention != 0:
                         attn_loss = 0
                         cls_masks = []
+                        cls_masks_gt = []
 
                         for batch_idx in range(self.args.train_batch_size):
 
                             GT_masks = F.interpolate(
-                                input=batch["instance_masks"][batch_idx], size=(16, 16)
+                                input=batch["instance_masks"][batch_idx], size=(24, 24)
                             )
 
                             if self.args.with_prior_preservation:
                                 curr_cond_batch_idx = self.args.train_batch_size + batch_idx
 
                                 agg_attn_prior = self.aggregate_attention(
-                                    res=16,
+                                    res=24,
                                     from_where=("up", "down"),
                                     is_cross=True,
-                                    with_prior_preservation=self.args.with_prior_preservation,
                                     select=batch_idx,
+                                    batch_size=self.args.train_batch_size * 2,
+                                    use_half=False,
                                 )
 
                             else:
                                 curr_cond_batch_idx = batch_idx
 
                             agg_attn = self.aggregate_attention(
-                                res=16,
+                                res=24,
                                 from_where=("up", "down"),
                                 is_cross=True,
-                                with_prior_preservation=self.args.with_prior_preservation,
                                 select=curr_cond_batch_idx,
+                                batch_size=self.args.train_batch_size * 2,
+                                use_half=False,
                             )
 
                             valid_masks_num = len(GT_masks.sum(dim=(2, 3)).flatten().nonzero())
 
                             cls_attn_masks = []
+                            cls_attn_masks_gt = []
 
                             for mask_id in range(valid_masks_num):
                                 curr_placeholder_token_id = self.placeholder_token_ids[
@@ -1519,7 +1607,7 @@ class SpatialDreambooth:
 
                                 if self.args.with_prior_preservation:
 
-                                    # agg_attn [16,16,77]
+                                    # agg_attn [24,24,77]
                                     class_idx = ((
                                         batch["input_ids"][batch_idx] == curr_class_token_id
                                     ).nonzero().item())
@@ -1527,6 +1615,16 @@ class SpatialDreambooth:
                                     cls_attn_mask = agg_attn_prior[..., class_idx]
                                     cls_attn_mask = (cls_attn_mask / cls_attn_mask.max())
                                     cls_attn_masks.append(cls_attn_mask)
+
+                                    person_filename = batch["person_filenames"][batch_idx]
+                                    person_filename = clean_decode_prompt(
+                                        person_filename, self.tokenizer, remove_blank=True
+                                    )
+
+                                    cls_attn_masks_gt.append(
+                                        self.attn_mask_cache[person_filename][
+                                            curr_class_token_id.item()]
+                                    )
 
                                 asset_idx = ((
                                     batch["input_ids"][curr_cond_batch_idx] ==
@@ -1547,12 +1645,18 @@ class SpatialDreambooth:
                                 max_cls_mask_all = torch.max(
                                     torch.stack(cls_attn_masks), dim=0, keepdims=True
                                 ).values
+                                max_cls_mask_gt_all = torch.max(
+                                    torch.stack(cls_attn_masks_gt), dim=0, keepdims=True
+                                ).values
                                 cls_masks.append(max_cls_mask_all)
+                                cls_masks_gt.append(max_cls_mask_gt_all)
 
                         if self.args.with_prior_preservation:
-                            cls_mask = F.interpolate(torch.stack(cls_masks), size=(64, 64))
-                            prior_pred = prior_pred * cls_mask
-                            prior_target = prior_target * cls_mask
+                            cls_mask = F.interpolate(torch.stack(cls_masks), size=(96, 96))
+                            cls_mask_gt = F.interpolate(torch.stack(cls_masks_gt), size=(96, 96))
+                            if self.args.apply_masked_prior:
+                                prior_pred = prior_pred * cls_mask_gt
+                                prior_target = prior_target * cls_mask_gt
 
                             prior_loss = F.mse_loss(
                                 prior_pred.float(),
@@ -1560,8 +1664,17 @@ class SpatialDreambooth:
                                 reduction="mean",
                             ) * self.args.prior_loss_weight / self.args.train_batch_size
 
+                            mask_loss = F.mse_loss(
+                                cls_mask.float(),
+                                cls_mask_gt.float(),
+                                reduction="mean",
+                            ) * self.args.mask_loss_weight / self.args.train_batch_size
+
                             loss += prior_loss
                             logs["l_prior"] = prior_loss.detach().item()
+
+                            loss += mask_loss
+                            logs["l_mask"] = mask_loss.detach().item()
 
                         attn_loss = self.args.lambda_attention * (
                             attn_loss / self.args.train_batch_size
@@ -1608,12 +1721,8 @@ class SpatialDreambooth:
                         os.makedirs(img_logs_path, exist_ok=True)
 
                         if self.args.lambda_attention != 0:
-                            self.controller.cur_step = 1
                             last_sentence = batch["input_ids"][curr_cond_batch_idx]
-                            last_sentence = last_sentence[(last_sentence != 0) &
-                                                          (last_sentence != 49406) &
-                                                          (last_sentence != 49407)]
-                            last_sentence = self.tokenizer.decode(last_sentence)
+                            last_sentence = clean_decode_prompt(last_sentence, self.tokenizer)
 
                             step_attn_vis = self.save_cross_attention_vis(
                                 last_sentence,
@@ -1631,12 +1740,8 @@ class SpatialDreambooth:
                             })
 
                             if self.args.with_prior_preservation:
-
                                 last_sentence = batch["input_ids"][batch_idx]
-                                last_sentence = last_sentence[(last_sentence != 0) &
-                                                              (last_sentence != 49406) &
-                                                              (last_sentence != 49407)]
-                                last_sentence = self.tokenizer.decode(last_sentence)
+                                last_sentence = clean_decode_prompt(last_sentence, self.tokenizer)
 
                                 prior_attn_vis = self.save_cross_attention_vis(
                                     last_sentence,
@@ -1655,25 +1760,36 @@ class SpatialDreambooth:
                         self.controller.cur_step = 0
                         self.controller.attention_store = {}
 
-                        full_rgb = self.perform_full_inference()
-                        full_agg_attn = self.aggregate_attention(
-                            res=16,
-                            from_where=("up", "down"),
-                            is_cross=True,
-                            with_prior_preservation=False,
-                            select=0
-                        )
-                        full_attn_vis = self.save_cross_attention_vis(
-                            self.args.instance_prompt,
-                            batch_pixels=full_rgb,
-                            attention_maps=full_agg_attn.detach().cpu(),
-                            path=os.path.join(img_logs_path, f"{global_step:05}_full_attn.jpg"),
-                        )
+                        full_rgb, full_rgb_raw = self.perform_full_inference()
 
-                        self.accelerator.trackers[0].log({
-                            "prior_attn":
-                            [wandb.Image(full_attn_vis, caption=f"{self.args.instance_prompt}")]
-                        })
+                        vis_dict = {}
+
+                        for idx, name in enumerate(["", "_raw"]):
+
+                            cur_prompt = self.args.instance_prompt if name == "" else self.args.instance_prompt_raw
+                            cur_rgb = full_rgb if name == "" else full_rgb_raw
+
+                            full_agg_attn = self.aggregate_attention(
+                                res=24,
+                                from_where=("up", "down"),
+                                is_cross=True,
+                                select=idx,
+                                batch_size=2,
+                            )
+                            full_attn_vis = self.save_cross_attention_vis(
+                                cur_prompt,
+                                batch_pixels=cur_rgb,
+                                attention_maps=full_agg_attn.detach().cpu(),
+                                path=os.path.join(
+                                    img_logs_path, f"{global_step:05}_full_attn{name}.jpg"
+                                ),
+                            )
+                            vis_dict.update({
+                                f"full_attn{name}":
+                                [wandb.Image(full_attn_vis, caption=f"{cur_prompt}")]
+                            })
+
+                        self.accelerator.trackers[0].log(vis_dict)
 
                         self.controller.cur_step = 0
                         self.controller.attention_store = {}
@@ -1682,6 +1798,8 @@ class SpatialDreambooth:
                 logs["lr"] = lr_scheduler.get_last_lr()[0]
                 progress_bar.set_postfix(**logs)
                 self.accelerator.log(logs, step=global_step)
+
+                torch.cuda.empty_cache()
 
                 if global_step >= self.args.max_train_steps:
                     break
@@ -1755,18 +1873,29 @@ class SpatialDreambooth:
         return average_attention
 
     def aggregate_attention(
-        self, res: int, from_where: List[str], is_cross: bool, with_prior_preservation: bool,
-        select: int
+        self,
+        res: int,
+        from_where: List[str],
+        is_cross: bool,
+        select: int,
+        batch_size: int,
+        use_half: bool = True
     ):
         out = []
         attention_maps = self.get_average_attention()
         num_pixels = res**2
-        batch_size = self.args.train_batch_size * 2 if with_prior_preservation else self.args.train_batch_size
+
         for location in from_where:
             for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
                 if item.shape[1] == num_pixels:
-                    cross_maps = item.reshape(batch_size, -1, res, res, item.shape[-1])[select]
+                    if use_half:
+                        h = item.shape[0] // 2
+                        cross_maps = item[h:].reshape(batch_size, -1, res, res,
+                                                      item.shape[-1])[select]
+                    else:
+                        cross_maps = item.reshape(batch_size, -1, res, res, item.shape[-1])[select]
                     out.append(cross_maps)
+
         out = torch.cat(out, dim=0)
         out = out.sum(0) / out.shape[0]
         return out
@@ -1776,22 +1905,23 @@ class SpatialDreambooth:
         self.unet.eval()
         self.text_encoder.eval()
 
-        latents = torch.randn((1, 4, 64, 64), device=self.accelerator.device)
+        latents = torch.randn((2, 4, 96, 96), device=self.accelerator.device)
         uncond_input = self.tokenizer(
-            [""],
+            ["", ""],
             padding="max_length",
             max_length=self.tokenizer.model_max_length,
             return_tensors="pt",
-        ).to(self.accelerator.device)
+        ).input_ids.to(self.accelerator.device)
         input_ids = self.tokenizer(
-            [self.args.instance_prompt],
+            [self.args.instance_prompt, self.args.instance_prompt_raw],
             padding="max_length",
             truncation=True,
             max_length=self.tokenizer.model_max_length,
             return_tensors="pt",
         ).input_ids.to(self.accelerator.device)
+
         cond_embeddings = self.text_encoder(input_ids)[0]
-        uncond_embeddings = self.text_encoder(uncond_input.input_ids)[0]
+        uncond_embeddings = self.text_encoder(uncond_input)[0]
         text_embeddings = torch.cat([uncond_embeddings, cond_embeddings])
 
         for t in self.validation_scheduler.timesteps:
@@ -1816,17 +1946,15 @@ class SpatialDreambooth:
         images = (images * 255).round().astype("uint8")
 
         self.accelerator.trackers[0].log({
-            "validation": [
-                wandb.Image(image, caption=f"{i:02d}: {self.args.instance_prompt}")
-                for i, image in enumerate(images)
-            ]
+            "validation": [wandb.Image(images[0], caption=f"{self.args.instance_prompt}")],
+            "validation_raw": [wandb.Image(images[1], caption=f"{self.args.instance_prompt_raw}")],
         })
 
         self.unet.train()
         if self.args.train_text_encoder:
             self.text_encoder.train()
 
-        return Image.fromarray(images[0])
+        return Image.fromarray(images[0]), Image.fromarray(images[1])
 
     @torch.no_grad()
     def save_cross_attention_vis(self, prompt, batch_pixels, attention_maps, path):

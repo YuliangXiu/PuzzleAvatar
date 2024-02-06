@@ -89,22 +89,17 @@ class AttentionControl(abc.ABC):
     def between_steps(self):
         return
 
-    @property
-    def num_uncond_att_layers(self):
-        return 0
-
     @abc.abstractmethod
     def forward(self, attn, is_cross: bool, place_in_unet: str):
         raise NotImplementedError
 
     def __call__(self, attn, is_cross: bool, place_in_unet: str):
-        attn_ = attn.clone()
-        if self.cur_att_layer >= self.num_uncond_att_layers:
-            h = attn.shape[0]
-            # attn_[h // 2:] = self.forward(attn[h // 2:], is_cross, place_in_unet)
-            attn_ = self.forward(attn, is_cross, place_in_unet)
+        
+        
+        attn_ = self.forward(attn, is_cross, place_in_unet)
+        
         self.cur_att_layer += 1
-        if self.cur_att_layer == self.num_att_layers + self.num_uncond_att_layers:
+        if self.cur_att_layer == self.num_att_layers:
             self.cur_att_layer = 0
             self.cur_step += 1
             self.between_steps()

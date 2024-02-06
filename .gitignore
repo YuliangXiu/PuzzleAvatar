@@ -11,6 +11,7 @@ logs
 *.pt
 *.txt
 .vscode
+tmp
 wandb
 OPENAI_API_KEY
 cores/lib/freqencoder/build
