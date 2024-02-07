@@ -25,41 +25,57 @@ def load_config(path, default_path=None):
 
 def dict_to_prompt(d, use_shape=False):
 
-    prompt = "a high-resolution DSLR colored image of"
-    keys = list(d.keys())
+    classes = list(d.keys())
     gender = "man" if d['gender'] == "male" else "woman"
-    keys.remove("gender")
+    classes.remove("gender")
+
+    prompt_head = f"a high-resolution DSLR colored image of a {gender}"
 
     for key in ["eyeglasses", "sunglasses", "glasses"]:
-        if key in keys:
-            keys.remove(key)
+        if key in classes:
+            classes.remove(key)
 
-    prompt += f" a {gender}, "
-    with_classes = ['face', 'haircut']
+    tokens = [f"<asset{i}>" for i in range(len(classes))]
+    descs = [d[key] for key in classes]
 
-    # with {face} and {haircut}
-    for key in with_classes:
-        if key in keys:
-            idx = keys.index(key)
-            if use_shape:
-                prompt += f"<asset{idx}> {d[key]} {key}, "
+    facial_classes = ['face', 'haircut', 'hair']
+    with_classes = [cls for cls in classes if cls in facial_classes]
+    wear_classes = [cls for cls in classes if cls not in facial_classes]
+
+    prompt = f"{prompt_head}, "
+
+    for class_token in with_classes:
+        idx = classes.index(class_token)
+
+        if len(wear_classes) == 0 and with_classes.index(class_token) == len(with_classes) - 1:
+            ending = "."
+        else:
+            ending = ", "
+
+        if use_shape:
+            prompt += f"{tokens[idx]} {descs[idx]} {class_token}{ending}"
+        else:
+            prompt += f"{tokens[idx]} {class_token}{ending}"
+
+    if len(wear_classes) > 0:
+        prompt += "wearing "
+
+        for class_token in wear_classes:
+
+            idx = classes.index(class_token)
+
+            if wear_classes.index(class_token) < len(wear_classes) - 2:
+                ending = ", "
+            elif wear_classes.index(class_token) == len(wear_classes) - 2:
+                ending = ", and "
             else:
-                prompt += f"<asset{idx}> {key}, "
+                ending = "."
+            if use_shape:
+                prompt += f"{tokens[idx]} {descs[idx]} {class_token}{ending}"
+            else:
+                prompt += f"{tokens[idx]} {class_token}{ending}"
 
-    if use_shape:
-        prompt += "wearing " + " , ".join([
-            f"<asset{keys.index(key)}> {d[key]} {key}" for key in keys if key not in with_classes
-        ]) + " at the beach."
-    else:
-        prompt += "wearing " + " , ".join([
-            f"<asset{keys.index(key)}> {key}" for key in keys if key not in with_classes
-        ]) + " at the beach."
-
-    placeholders = []
-    for key in keys:
-        placeholders.append(f"<asset{keys.index(key)}>")
-
-    return d['gender'], prompt, placeholders
+    return d['gender'], prompt, tokens
 
 
 # torch.autograd.set_detect_anomaly(True)
@@ -101,6 +117,7 @@ if __name__ == '__main__':
     # create smplx base meshes wrt gender
     smplx_path = os.path.join(opt.exp_dir.replace("results", "data"), f"smplx_{gender}.obj")
     keypoint_path = os.path.join(opt.exp_dir.replace("results", "data"), f"smplx_{gender}.npy")
+
     cfg.data.last_model = smplx_path
     cfg.data.keypoints_path = keypoint_path
 
@@ -108,6 +125,8 @@ if __name__ == '__main__':
         cfg.data.last_model = os.path.join(opt.exp_dir, 'obj', f"{opt.sub_name}_geometry_final.obj")
 
     if not os.path.exists(smplx_path) or not os.path.exists(keypoint_path):
+
+        use_puzzle = True if "PuzzleIOI" in opt.exp_dir else False
 
         smplx_container = SMPLX()
         smplx_model = smplx.create(
@@ -119,49 +138,31 @@ if __name__ == '__main__':
             use_pca=True,
             num_betas=10,
             num_expression_coeffs=10,
-            flat_hand_mean=True,
+            flat_hand_mean=not use_puzzle,
             ext='pkl'
         )
 
-        if "outfit" in cfg.sub_name:
+        if use_puzzle:
 
             smpl_param_path = os.path.join(
                 opt.exp_dir.replace("results", "data").replace("puzzle", "fitting"),
-                "output/smplx/smpl/000000.json"
+                "smplx/smplx.pkl"
             )
+            print(f"SMPL pkl path: {smpl_param_path}")
 
-            smpl_param = json.load(open(smpl_param_path, "r"))[0]
+            smpl_param = np.load(smpl_param_path, allow_pickle=True)
+
+            for key in ["gender", "keypoints_3d"]:
+                smpl_param.pop(key, None)
 
             for key in smpl_param.keys():
-                smpl_param[key] = torch.as_tensor(np.array(smpl_param[key])).float()
+                smpl_param[key] = torch.as_tensor(smpl_param[key]).float()
 
-            NUM_JOINTS = 21
-
-            smplx_obj = smplx_model(
-                betas=smpl_param['shapes'],
-                global_orient=smpl_param['poses'][:, :3],
-                body_pose=smpl_param["poses"][:, 3:(NUM_JOINTS + 1) * 3],
-                expression=smpl_param['expression'],
-                jaw_pose=smpl_param['poses'][:, (NUM_JOINTS + 1) * 3:(NUM_JOINTS + 2) * 3],
-                leye_pose=smpl_param['poses'][:, (NUM_JOINTS + 2) * 3:(NUM_JOINTS + 3) * 3],
-                reye_pose=smpl_param['poses'][:, (NUM_JOINTS + 3) * 3:(NUM_JOINTS + 4) * 3],
-                left_hand_pose=smpl_param['poses'][:, (NUM_JOINTS + 4) * 3:(NUM_JOINTS + 6) * 3],
-                right_hand_pose=smpl_param['poses'][:, (NUM_JOINTS + 6) * 3:],
-                return_verts=True,
-                return_full_pose=True,
-                return_joint_transformation=True,
-                return_vertex_transformation=True,
-            )
+            smplx_obj = smplx_model(**smpl_param)
 
         else:
 
-            smplx_obj = smplx_model(
-                return_verts=True,
-                return_full_pose=True,
-                return_joint_transformation=True,
-                return_vertex_transformation=True,
-                pose_type="a-pose"
-            )
+            smplx_obj = smplx_model(pose_type="a-pose")
 
         smplx_verts = smplx_obj.vertices.detach()[0].numpy()
         smplx_joints = smplx_obj.joints.detach()[0].numpy()

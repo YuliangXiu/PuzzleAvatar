@@ -126,6 +126,12 @@ def parse_args():
         help="Pretrained tokenizer name or path if not the same as model_name",
     )
     parser.add_argument(
+        "--project_name",
+        type=str,
+        default=None,
+        help="The name of the project to which the model will be uploaded.",
+    )
+    parser.add_argument(
         "--gender",
         type=str,
         default=None,
@@ -602,7 +608,7 @@ class DreamBoothDataset(Dataset):
         self.class_data_root = class_data_root
         self.num_class_images = num_class_images
 
-        instance_img_paths = sorted(glob.glob(f"{instance_data_root}/image/*"))
+        instance_img_paths = sorted(glob.glob(f"{instance_data_root}/image/*[!raw].jpg"))
 
         self.instance_images = []
         self.instance_masks = []
@@ -641,7 +647,9 @@ class DreamBoothDataset(Dataset):
         self.class_images_path = {}
         if self.class_data_root is not None and self.with_prior_preservation:
             class_data_dir = Path(class_data_root) / self.sd_version / self.gender
-            self.class_images_path[self.gender] = list(class_data_dir.iterdir())
+            self.class_images_path[self.gender] = [
+                item for item in list(class_data_dir.iterdir()) if str(item).endswith(".jpg")
+            ]
         else:
             self.class_data_root = None
 
@@ -683,7 +691,9 @@ class DreamBoothDataset(Dataset):
             for class_token in wear_classes:
                 idx = classes_to_use.index(class_token)
 
-                if wear_classes.index(class_token) < len(wear_classes) - 1:
+                if wear_classes.index(class_token) < len(wear_classes) - 2:
+                    ending = ", "
+                elif wear_classes.index(class_token) == len(wear_classes) - 2:
                     ending = ", and "
                 else:
                     ending = "."
@@ -864,7 +874,9 @@ def construct_prior_prompt(gender, all_classes, gpt4v_dict, use_shape_desc):
 
         for class_token in wear_classes:
 
-            if wear_classes.index(class_token) < len(wear_classes) - 1:
+            if wear_classes.index(class_token) < len(wear_classes) - 2:
+                ending = ", "
+            elif wear_classes.index(class_token) == len(wear_classes) - 2:
                 ending = ", and "
             else:
                 ending = "."
@@ -917,6 +929,7 @@ class SpatialDreambooth:
         self.args, self.gpt4v_response = parse_args()
         self.attn_mask_cache = {}
         self.class_ids = []
+        self.save_attn_mask_cache = False
 
         self.main()
 
@@ -932,10 +945,12 @@ class SpatialDreambooth:
 
         if self.args.report_to == "wandb":
 
-            wandb_init = {"wandb": {
-                "name": "multi-concept",
-                "mode": self.args.wandb_mode,
-            }}
+            wandb_init = {
+                "wandb": {
+                    "name": self.args.project_name,
+                    "mode": self.args.wandb_mode,
+                }
+            }
 
         if (
             self.args.train_text_encoder and self.args.gradient_accumulation_steps > 1 and
@@ -1111,7 +1126,9 @@ class SpatialDreambooth:
         self.register_attention_control(self.controller)
 
         pretrained_name = self.args.pretrained_model_name_or_path.split("/")[-1]
-        cached_masks_path = Path(self.args.class_data_dir, f"{pretrained_name}/attn_masks_cache.pt")
+        cached_masks_path = Path(
+            self.args.class_data_dir, f"{pretrained_name}/{self.args.gender}/attn_masks_cache.pt"
+        )
 
         # Generate class images if prior preservation is enabled.
 
@@ -1132,11 +1149,11 @@ class SpatialDreambooth:
                     )
                     self.unet.eval()
                     pipeline.unet = self.unet
-                    pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+                    # pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
                     pipeline.set_progress_bar_config(disable=True)
                     pipeline.to(self.accelerator.device)
 
-                    for class_name in self.args.initializer_tokens + [self.args.gender]:
+                    for class_name in [self.args.gender]:
 
                         class_prompt = construct_prior_prompt(
                             self.args.gender,
@@ -1211,9 +1228,6 @@ class SpatialDreambooth:
                                 self.controller.cur_step = 0
 
                     del pipeline
-                    del sample_dataset
-                    del sample_dataloader
-                    del agg_attn_pre
 
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
@@ -1315,7 +1329,7 @@ class SpatialDreambooth:
         # The trackers initializes automatically on the main process.
         if self.accelerator.is_main_process:
             self.accelerator.init_trackers(
-                "dreambooth-raw", config=vars(self.args), init_kwargs=wandb_init
+                "multi-concepts", config=vars(self.args), init_kwargs=wandb_init
             )
 
         # Train
@@ -1595,12 +1609,16 @@ class SpatialDreambooth:
                                 use_half=False,
                             )
 
-                            valid_masks_num = len(GT_masks.sum(dim=(2, 3)).flatten().nonzero())
-
                             cls_attn_masks = []
                             cls_attn_masks_gt = []
 
-                            for mask_id in range(valid_masks_num):
+                            person_filename = batch["person_filenames"][batch_idx]
+                            person_filename = clean_decode_prompt(
+                                person_filename, self.tokenizer, remove_blank=True
+                            )
+
+                            for mask_id in range(len(batch["class_ids"][batch_idx].nonzero())):
+
                                 curr_placeholder_token_id = self.placeholder_token_ids[
                                     batch["token_ids"][batch_idx][mask_id]]
                                 curr_class_token_id = batch["class_ids"][batch_idx][mask_id]
@@ -1616,15 +1634,18 @@ class SpatialDreambooth:
                                     cls_attn_mask = (cls_attn_mask / cls_attn_mask.max())
                                     cls_attn_masks.append(cls_attn_mask)
 
-                                    person_filename = batch["person_filenames"][batch_idx]
-                                    person_filename = clean_decode_prompt(
-                                        person_filename, self.tokenizer, remove_blank=True
-                                    )
+                                    if self.args.apply_masked_prior:
+                                        # use first infered attn_mask as the groundtruth attn_mask
+                                        if curr_class_token_id.item(
+                                        ) not in self.attn_mask_cache[person_filename].keys():
+                                            self.attn_mask_cache[person_filename][
+                                                curr_class_token_id.item()] = cls_attn_mask.detach()
+                                            self.save_attn_mask_cache = True
 
-                                    cls_attn_masks_gt.append(
-                                        self.attn_mask_cache[person_filename][
-                                            curr_class_token_id.item()]
-                                    )
+                                        cls_attn_masks_gt.append(
+                                            self.attn_mask_cache[person_filename][
+                                                curr_class_token_id.item()]
+                                        )
 
                                 asset_idx = ((
                                     batch["input_ids"][curr_cond_batch_idx] ==
@@ -1642,21 +1663,36 @@ class SpatialDreambooth:
                                 )
 
                             if self.args.with_prior_preservation:
+
                                 max_cls_mask_all = torch.max(
                                     torch.stack(cls_attn_masks), dim=0, keepdims=True
                                 ).values
-                                max_cls_mask_gt_all = torch.max(
-                                    torch.stack(cls_attn_masks_gt), dim=0, keepdims=True
-                                ).values
                                 cls_masks.append(max_cls_mask_all)
-                                cls_masks_gt.append(max_cls_mask_gt_all)
+
+                                if self.args.apply_masked_prior:
+                                    max_cls_mask_gt_all = torch.max(
+                                        torch.stack(cls_attn_masks_gt), dim=0, keepdims=True
+                                    ).values
+                                    cls_masks_gt.append(max_cls_mask_gt_all)
 
                         if self.args.with_prior_preservation:
                             cls_mask = F.interpolate(torch.stack(cls_masks), size=(96, 96))
-                            cls_mask_gt = F.interpolate(torch.stack(cls_masks_gt), size=(96, 96))
+
                             if self.args.apply_masked_prior:
+                                cls_mask_gt = F.interpolate(
+                                    torch.stack(cls_masks_gt), size=(96, 96)
+                                )
                                 prior_pred = prior_pred * cls_mask_gt
                                 prior_target = prior_target * cls_mask_gt
+
+                                mask_loss = F.mse_loss(
+                                    cls_mask.float(),
+                                    cls_mask_gt.float(),
+                                    reduction="mean",
+                                ) * self.args.mask_loss_weight / self.args.train_batch_size
+
+                                loss += mask_loss
+                                logs["l_mask"] = mask_loss.detach().item()
 
                             prior_loss = F.mse_loss(
                                 prior_pred.float(),
@@ -1664,17 +1700,8 @@ class SpatialDreambooth:
                                 reduction="mean",
                             ) * self.args.prior_loss_weight / self.args.train_batch_size
 
-                            mask_loss = F.mse_loss(
-                                cls_mask.float(),
-                                cls_mask_gt.float(),
-                                reduction="mean",
-                            ) * self.args.mask_loss_weight / self.args.train_batch_size
-
                             loss += prior_loss
                             logs["l_prior"] = prior_loss.detach().item()
-
-                            loss += mask_loss
-                            logs["l_mask"] = mask_loss.detach().item()
 
                         attn_loss = self.args.lambda_attention * (
                             attn_loss / self.args.train_batch_size
@@ -1806,6 +1833,10 @@ class SpatialDreambooth:
 
         self.accelerator.end_training()
         self.save_adaptor()
+
+        # save again
+        if self.save_attn_mask_cache:
+            torch.save(self.attn_mask_cache, cached_masks_path)
 
     def save_adaptor(self, step=""):
 

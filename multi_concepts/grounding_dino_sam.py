@@ -110,7 +110,10 @@ def gpt4v_captioning(img_dir):
         f"Bearer {os.environ['OPENAI_API_KEY']}"
     }
 
-    used_lst = [f"{idx}.jpg" for idx in np.random.randint(101, 120, 3)]
+    if "PuzzleIOI" in img_dir:
+        used_lst = [f"{idx}.jpg" for idx in np.random.randint(101, 120, 3)]
+    else:
+        used_lst = random.sample(os.listdir(img_dir), 3)
     images = [encode_image(os.path.join(img_dir, img_name)) for img_name in used_lst]
     prompt = open("./multi_concepts/gpt4v_prompt.txt", "r").read()
 

@@ -1,6 +1,4 @@
-from diffusers import (
-    AutoencoderKL, ControlNetModel, DDIMScheduler, UNet2DConditionModel, DiffusionPipeline
-)
+from diffusers import (ControlNetModel, DDIMScheduler, UNet2DConditionModel, DiffusionPipeline)
 from transformers import CLIPTextModel, CLIPTokenizer, logging
 
 # suppress partial model loading warning
@@ -77,16 +75,25 @@ class StableDiffusion(nn.Module):
 
         if self.use_peft != 'none':
 
-            # Create model
-            self.vae = AutoencoderKL.from_pretrained(base_model_key,
-                                                     subfolder="vae").to(self.device)
-            self.tokenizer = CLIPTokenizer.from_pretrained(base_model_key, subfolder="tokenizer")
+            pipe = DiffusionPipeline.from_pretrained(
+                base_model_key,
+                torch_dtype=torch.float32,
+                requires_safety_checker=False,
+            ).to(self.device)
 
+            # add tokens
+            num_added_tokens = pipe.tokenizer.add_tokens(self.placeholders)
+            print(f"Added {num_added_tokens} tokens")
+            pipe.text_encoder.resize_token_embeddings(len(pipe.tokenizer))
+
+            # load peft model
             from peft import PeftModel
             self.text_encoder = PeftModel.from_pretrained(
-                self.text_encoder, join(model_key, 'text_encoder')
+                pipe.text_encoder, join(model_key, 'text_encoder')
             )
-            self.unet = PeftModel.from_pretrained(self.unet, join(model_key, 'unet'))
+            self.unet = PeftModel.from_pretrained(pipe.unet, join(model_key, 'unet'))
+            self.vae = pipe.vae
+            self.tokenizer = pipe.tokenizer
 
         else:
             pipe = DiffusionPipeline.from_pretrained(
@@ -94,19 +101,20 @@ class StableDiffusion(nn.Module):
                 torch_dtype=torch.float32,
                 requires_safety_checker=False,
             ).to(self.device)
-            self.tokenizer = pipe.tokenizer
+
             self.text_encoder = pipe.text_encoder
             self.unet = pipe.unet
             self.vae = pipe.vae
+            self.tokenizer = pipe.tokenizer
 
-        num_added_tokens = self.tokenizer.add_tokens(self.placeholders)
-        print(f"Added {num_added_tokens} tokens")
-        self.text_encoder.resize_token_embeddings(len(self.tokenizer))
+            num_added_tokens = self.tokenizer.add_tokens(self.placeholders)
+            print(f"Added {num_added_tokens} tokens")
+            self.text_encoder.resize_token_embeddings(len(self.tokenizer))
 
         # enable FreeU
-        self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+        # self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
 
-        print(f'[INFO] loaded BOFT adapters!')
+        print(f'[INFO] loaded PEFT adapters!')
 
         self.use_head_model = head_hf_key is not None
 
@@ -147,7 +155,6 @@ class StableDiffusion(nn.Module):
         else:
             tokenizer = self.tokenizer_head
             text_encoder = self.text_encoder_head
-        # prompt, negative_prompt: [str]
 
         # Tokenize text and get embeddings
         text_input = tokenizer(
@@ -185,7 +192,7 @@ class StableDiffusion(nn.Module):
         self,
         text_embeddings,
         pred_rgb,
-        guidance_scale=100,
+        guidance_scale=7.5,
         controlnet_hint=None,
         controlnet_conditioning_scale=1.0,
         is_face=False,
@@ -208,22 +215,17 @@ class StableDiffusion(nn.Module):
         )
 
         # encode image into latents with vae, requires grad!
+        latent_lst = []
 
-        pred_rgb_512 = F.interpolate(pred_rgb[0], (512, 512), mode='bilinear', align_corners=False)
-        pred_blend = pred_rgb_512
-
-        if len(pred_rgb) == 2 and t > 100:
-            pred_norm_512 = F.interpolate(
-                pred_rgb[1], (512, 512), mode='bilinear', align_corners=False
+        for idx in range(len(pred_rgb)):
+            pred_img = F.interpolate(
+                pred_rgb[idx], (512, 512), mode='bilinear', align_corners=False
             )
-            pred_blend = pred_rgb_512 * self.alphas[t] + pred_norm_512 * (1 - self.alphas[t])
-            pred_blend = pred_blend.clamp(0., 1.)
+            latent_lst.append(self.encode_imgs(pred_img))
 
-        latents = self.encode_imgs(pred_blend)
-        # torch.cuda.synchronize(); print(f'[TIME] guiding: vae enc {time.time() - _t:.4f}s')
+        latents = torch.mean(torch.stack(latent_lst, dim=0), dim=0)
 
         # predict the noise residual with unet, NO grad!
-        # _t = time.time()
         with torch.no_grad():
             # add noise
             noise = torch.randn_like(latents)
@@ -250,7 +252,6 @@ class StableDiffusion(nn.Module):
                 noise_pred = unet(
                     latent_model_input, t, encoder_hidden_states=text_embeddings
                 ).sample
-        # torch.cuda.synchronize(); print(f'[TIME] guiding: unet {time.time() - _t:.4f}s')
 
         # perform guidance (high scale from paper!)
 

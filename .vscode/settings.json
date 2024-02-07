@@ -45,15 +45,7 @@
             "group": "Default"
         },
         {
-            "filePath": "data/human/yuliang/packed",
-            "group": "Default"
-        },
-        {
             "filePath": "logs/03594/outfit01",
-            "group": "Default"
-        },
-        {
-            "filePath": "logs/03595/outfit13",
             "group": "Default"
         },
         {
@@ -81,10 +73,6 @@
             "group": "Default"
         },
         {
-            "filePath": "data/PuzzleIOI/puzzle/03595/outfit13",
-            "group": "Default"
-        },
-        {
             "filePath": "scripts/train_multi_concepts.sh",
             "group": "Default"
         },
@@ -93,7 +81,15 @@
             "group": "Default"
         },
         {
-            "filePath": "logs/human/yuliang/ground_sam.out",
+            "filePath": "results/PuzzleIOI/puzzle/03594/outfit01/geometry/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle/03594/outfit01/texture/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/human/yuliang/run.err",
             "group": "Default"
         }
     ]

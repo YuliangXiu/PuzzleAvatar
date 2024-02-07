@@ -223,7 +223,7 @@ class DMTetMesh(nn.Module):
             
             optimizer = torch.optim.Adam(list(self.parameters()), lr=1e-3)
             batch_size = 300000
-            iter = 200
+            iter = 1000
             points, sdf_gt = mesh_to_sdf.sample_sdf_near_surface(mesh)
             valid_idx = (points < self.tet_v.cpu().numpy().min(axis=0)
                         ).sum(-1) + (points > self.tet_v.cpu().numpy().max(axis=0)).sum(-1) == 0

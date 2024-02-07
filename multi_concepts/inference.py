@@ -25,19 +25,18 @@ from diffusers import DiffusionPipeline, DDIMScheduler
 from diffusers.utils.import_utils import is_xformers_available
 from peft import PeftModel
 
+negative_prompt = 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy, shadow, worst quality, jpeg artifacts, poorly drawn, dehydrated, noisy, poorly drawn, bad proportions, bad anatomy, bad lighting, bad composition, bad framing, fused fingers, noisy, duplicate characters'
 
 class BreakASceneInference:
     def __init__(self):
 
-        self.prompt_words = None
         self.classes = None
-        self.placeholder_tokens = None
+        self.tokens = None
         self.descs = None
         self.gender = None
 
         self._parse_args()
         self._load_meta_data()
-        self.construct_prompt()
         self._load_pipeline()
 
     def _load_meta_data(self):
@@ -53,7 +52,7 @@ class BreakASceneInference:
                 if key in self.classes:
                     self.classes.remove(key)
 
-            self.placeholder_tokens = [f"<asset{i}>" for i in range(len(self.classes))]
+            self.tokens = [f"<asset{i}>" for i in range(len(self.classes))]
             self.descs = [gpt4v_response[cls] for cls in self.classes]
 
     def _parse_args(self):
@@ -96,7 +95,7 @@ class BreakASceneInference:
                 self.args.pretrained_model_name_or_path, subfolder="scheduler"
             )
 
-            num_added_tokens = self.pipeline.tokenizer.add_tokens(self.placeholder_tokens)
+            num_added_tokens = self.pipeline.tokenizer.add_tokens(self.tokens)
             print(f"Added {num_added_tokens} tokens")
             self.pipeline.text_encoder.resize_token_embeddings(len(self.pipeline.tokenizer))
 
@@ -120,22 +119,20 @@ class BreakASceneInference:
                 requires_safety_checker=False,
             )
 
-        num_added_tokens = self.pipeline.tokenizer.add_tokens(self.placeholder_tokens)
+        num_added_tokens = self.pipeline.tokenizer.add_tokens(self.tokens)
         print(f"Added {num_added_tokens} tokens")
         self.pipeline.text_encoder.resize_token_embeddings(len(self.pipeline.tokenizer))
 
         if is_xformers_available():
             self.pipeline.unet.enable_xformers_memory_efficient_attention()
 
-        self.pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+        # self.pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
         self.pipeline.text_encoder.eval()
         self.pipeline.unet.eval()
         self.pipeline.to(self.args.device)
 
     @torch.no_grad()
     def infer_and_save(self, prompts, tokens):
-
-        negative_prompt = 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy, shadow, worst quality, jpeg artifacts, poorly drawn, dehydrated, noisy, poorly drawn, bad proportions, bad anatomy, bad lighting, bad composition, bad framing, fused fingers, noisy, duplicate characters'
 
         group_size = 8
 
@@ -164,7 +161,11 @@ class BreakASceneInference:
 
             cur_size += batch_size
 
-    def construct_prompt(self, classes_to_use, tokens_to_use, descs_to_use):
+    def construct_prompt(self, idx):
+
+        classes_to_use = [self.classes[i] for i in idx]
+        tokens_to_use = [self.tokens[i] for i in idx]
+        descs_to_use = [self.descs[i] for i in idx]
 
         # formulate the prompt and prompt_raw
         prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
@@ -196,7 +197,9 @@ class BreakASceneInference:
             for class_token in wear_classes:
                 idx = classes_to_use.index(class_token)
 
-                if wear_classes.index(class_token) < len(wear_classes) - 1:
+                if wear_classes.index(class_token) < len(wear_classes) - 2:
+                    ending = ", "
+                elif wear_classes.index(class_token) == len(wear_classes) - 2:
                     ending = ", and "
                 else:
                     ending = "."
@@ -207,7 +210,7 @@ class BreakASceneInference:
                     prompt += f"{tokens_to_use[idx]} {class_token}{ending}"
                     prompt_raw += f"{class_token}{ending}"
 
-        return prompt, prompt_raw
+        return prompt, prompt_raw, classes_to_use
 
 
 if __name__ == "__main__":
@@ -227,15 +230,12 @@ if __name__ == "__main__":
             random.sample(range(len(break_a_scene_inference.classes)), k=num_of_tokens)
         )
 
-        prompt, prompt_raw = break_a_scene_inference.construct_prompt(
-            break_a_scene_inference.classes[tokens_ids_to_use],
-            break_a_scene_inference.placeholder_tokens[tokens_ids_to_use],
-            break_a_scene_inference.prompt_words[tokens_ids_to_use]
+        prompt, prompt_raw, classes_to_use = break_a_scene_inference.construct_prompt(
+            tokens_ids_to_use
         )
 
-        tokens.append(
-            f"img{i:02d}_" + "_".join(break_a_scene_inference.classes[tokens_ids_to_use]) + ".png"
-        )
+        tokens.append(f"img{i:02d}_" + "_".join(classes_to_use))
+        tokens.append(f"img{i:02d}_" + "_".join(classes_to_use) + "_raw")
 
         prompts.append(prompt)
         prompts.append(prompt_raw)

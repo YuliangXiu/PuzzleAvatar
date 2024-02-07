@@ -24,8 +24,6 @@ smplx_path = glob(f"{args.dir.replace('results', 'data')}/smplx_*.obj")[0]
 tech_path = f"{args.dir}/obj/{args.name}_geometry.obj"
 smplx_obj = trimesh.load(smplx_path, maintain_orders=True, process=False)
 tech_obj = trimesh.load(tech_path, maintain_orders=True, process=False)
-# tech_obj = remesh_laplacian(tech_obj, 1e5)
-# tech_obj.export(f"{args.dir}/obj/{args.name}_geometry_remesh.obj")
 
 smpl_tree = cKDTree(smplx_obj.vertices)
 dist, idx = smpl_tree.query(tech_obj.vertices, k=5)
