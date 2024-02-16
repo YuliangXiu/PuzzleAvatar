@@ -488,6 +488,21 @@ class Trainer(object):
 
         pred_norm = None
 
+        # if self.cfg.stage == 'texture' and self.epoch < 2:
+
+        #     outputs_normal = self.model(
+        #         rays_o,
+        #         rays_d,
+        #         mvp,
+        #         H,
+        #         W,
+        #         poses=poses,
+        #         ambient_ratio=0.1,
+        #         shading='normal',
+        #         global_step=self.global_step
+        #     )
+        #     pred_norm = outputs_normal['image'].reshape(1, H, W, 3).permute(0, 3, 1, 2).contiguous()
+
         if self.cfg.train.lambda_depth > 0:
             depth_loss = total_variation(pred_depth, reduction='mean')
             loss += depth_loss * self.cfg.train.lambda_depth

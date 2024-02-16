@@ -35,6 +35,7 @@ data_root = "./data/PuzzleIOI/puzzle"
 with open("./clusters/subjects_all.txt", "w") as f:
     for subject in os.listdir(data_root):
         for motion in os.listdir(os.path.join(data_root, subject)):
+            os.makedirs(os.path.join("./logs", subject, motion), exist_ok=True)
             line_path = '/'.join(os.path.join(data_root, subject, motion).split('/')[2:])
             line = f"{line_path} {subject} {motion}\n"
             f.write(line)

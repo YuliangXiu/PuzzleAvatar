@@ -16,7 +16,7 @@ train:
     height_range: [-0.4, 0.4]
     theta_range: [60, 120]
     phi_diff: 30
-    face_sample_ratio: 0.4
+    face_sample_ratio: 0.5
     face_height_range: [0., 0.]
     face_radius_range: [0.3, 0.4]
     face_phi_diff: 30
@@ -24,8 +24,8 @@ train:
     face_phi_range: [-90, 90]
     render_relative_normal: True
     lambda_lap: 1e4
-    lambda_depth: 0
-    lambda_eik: 0
+    lambda_depth: 1e2
+    lambda_eik: 1e4
     lambda_sil: 0.
     lambda_normal: 0.
     lambda_recon: 0.
@@ -43,4 +43,4 @@ guidance:
     normal_text: "a smooth and detailed sculpture of"
     use_view_prompt: True
     guidance_scale: 7.5
-    step_range: [0.02, 0.25]
+    step_range: [0.02, 0.15]

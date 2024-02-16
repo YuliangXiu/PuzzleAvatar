@@ -6,8 +6,8 @@ log = ./logs/$(subject)/$(outfit)/ground_sam.log
 
 request_memory = 20000
 request_disk = 10G
-request_cpus = 8
+request_cpus = 4
 request_gpus = 1
-requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDAGlobalMemoryMb > 60000 && CUDADeviceName == "NVIDIA A100-SXM4-80GB")
+requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDAGlobalMemoryMb > 35000 && CUDADeviceName =!= "NVIDIA H100" && CUDADeviceName =!= "NVIDIA H100 80GB HBM3")
 
-queue dir,subject,outfit from ./clusters/yuliang.txt
+queue dir,subject,outfit from ./clusters/error.txt

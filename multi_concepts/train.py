@@ -729,9 +729,22 @@ class DreamBoothDataset(Dataset):
 
         # instance_masks, instance_images, placeholder_tokens are all lists
         num_of_tokens = random.randrange(1, len(self.placeholder_tokens[index % example_len]) + 1)
-        tokens_ids_to_use = random.sample(
-            range(len(self.placeholder_tokens[index % example_len])), k=num_of_tokens
+        sample_prop = np.ones(len(self.class_tokens[index % example_len]))
+
+        # human cares too much on head
+        for attn_cls in ['face', 'haircut']:
+            if attn_cls in self.class_tokens[index % example_len]:
+                sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 2.0
+
+        sample_prop /= sample_prop.sum()
+
+        tokens_ids_to_use = np.random.choice(
+            range(len(self.placeholder_tokens[index % example_len])),
+            size=num_of_tokens,
+            p=sample_prop,
+            replace=False,
         )
+
         tokens_to_use = [
             self.placeholder_tokens[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
         ]
@@ -761,18 +774,14 @@ class DreamBoothDataset(Dataset):
 
         if self.class_data_root and self.with_prior_preservation:
 
+            cls_img_path = self.class_images_path[self.gender][index % self.num_class_images]
+
             # for full human
-            person_image = Image.open(
-                self.class_images_path[self.gender][index % self.num_class_images]
-            )
+            person_image = Image.open(cls_img_path)
             if not person_image.mode == "RGB":
                 person_image = person_image.convert("RGB")
             example["person_images"] = self.image_transforms(person_image)
-            example["person_filename"] = self.tokener(
-                os.path.basename(
-                    str(self.class_images_path[self.gender][index % self.num_class_images])
-                )
-            )
+            example["person_filename"] = self.tokener(os.path.basename(str(cls_img_path)))
 
         return example
 
@@ -930,6 +939,14 @@ class SpatialDreambooth:
         self.attn_mask_cache = {}
         self.class_ids = []
         self.save_attn_mask_cache = False
+        if 'base' in self.args.pretrained_model_name_or_path:
+            self.attn_res = 16
+            self.mask_res = 64
+            self.args.resolution = 512
+        else:
+            self.attn_res = 24
+            self.mask_res = 96
+            self.args.resolution = 768
 
         self.main()
 
@@ -1205,7 +1222,7 @@ class SpatialDreambooth:
                                     self.attn_mask_cache[base_name] = {}
 
                                     agg_attn_pre = self.aggregate_attention(
-                                        res=24,
+                                        res=self.attn_res,
                                         from_where=("up", "down"),
                                         is_cross=True,
                                         select=batch_idx,
@@ -1431,7 +1448,7 @@ class SpatialDreambooth:
                         self.unet.print_trainable_parameters()
 
                         logger.info("***** Training with BOFT fine-tuning (unet) *****")
-                        logger.info(f"Structure of UNet be like: {self.unet} \n")
+                        # logger.info(f"Structure of UNet be like: {self.unet} \n")
 
                     if self.args.train_text_encoder:
                         if self.args.use_peft == "none":
@@ -1462,9 +1479,9 @@ class SpatialDreambooth:
                             self.text_encoder.print_trainable_parameters()
 
                             logger.info("***** Training with BOFT fine-tuning (text_encoder) *****")
-                            logger.info(
-                                f"Structure of Text Encoder be like: {self.text_encoder} \n"
-                            )
+                            # logger.info(
+                            #     f"Structure of Text Encoder be like: {self.text_encoder} \n"
+                            # )
 
                     unet_params = [param for param in self.unet.parameters() if param.requires_grad]
                     text_params = [
@@ -1562,7 +1579,9 @@ class SpatialDreambooth:
                         max_masks = torch.max(batch["instance_masks"], dim=1).values
 
                         # [1,1,96,96]
-                        downsampled_mask = F.interpolate(input=max_masks, size=(96, 96))
+                        downsampled_mask = F.interpolate(
+                            input=max_masks, size=(self.mask_res, self.mask_res)
+                        )
 
                         # partial masked
                         model_pred = model_pred * downsampled_mask
@@ -1582,14 +1601,15 @@ class SpatialDreambooth:
                         for batch_idx in range(self.args.train_batch_size):
 
                             GT_masks = F.interpolate(
-                                input=batch["instance_masks"][batch_idx], size=(24, 24)
+                                input=batch["instance_masks"][batch_idx],
+                                size=(self.attn_res, self.attn_res)
                             )
 
                             if self.args.with_prior_preservation:
                                 curr_cond_batch_idx = self.args.train_batch_size + batch_idx
 
                                 agg_attn_prior = self.aggregate_attention(
-                                    res=24,
+                                    res=self.attn_res,
                                     from_where=("up", "down"),
                                     is_cross=True,
                                     select=batch_idx,
@@ -1601,7 +1621,7 @@ class SpatialDreambooth:
                                 curr_cond_batch_idx = batch_idx
 
                             agg_attn = self.aggregate_attention(
-                                res=24,
+                                res=self.attn_res,
                                 from_where=("up", "down"),
                                 is_cross=True,
                                 select=curr_cond_batch_idx,
@@ -1653,14 +1673,15 @@ class SpatialDreambooth:
                                 ).nonzero().item())
 
                                 # <asset>
-                                asset_attn_mask = agg_attn[..., asset_idx]
-                                asset_attn_mask = (asset_attn_mask / asset_attn_mask.max())
+                                for offset in range(2):
+                                    asset_attn_mask = agg_attn[..., asset_idx + offset]
+                                    asset_attn_mask = (asset_attn_mask / asset_attn_mask.max())
 
-                                attn_loss += F.mse_loss(
-                                    GT_masks[mask_id, 0].float(),
-                                    asset_attn_mask.float(),
-                                    reduction="mean",
-                                )
+                                    attn_loss += F.mse_loss(
+                                        GT_masks[mask_id, 0].float(),
+                                        asset_attn_mask.float(),
+                                        reduction="mean",
+                                    )
 
                             if self.args.with_prior_preservation:
 
@@ -1676,11 +1697,13 @@ class SpatialDreambooth:
                                     cls_masks_gt.append(max_cls_mask_gt_all)
 
                         if self.args.with_prior_preservation:
-                            cls_mask = F.interpolate(torch.stack(cls_masks), size=(96, 96))
+                            cls_mask = F.interpolate(
+                                torch.stack(cls_masks), size=(self.mask_res, self.mask_res)
+                            )
 
                             if self.args.apply_masked_prior:
                                 cls_mask_gt = F.interpolate(
-                                    torch.stack(cls_masks_gt), size=(96, 96)
+                                    torch.stack(cls_masks_gt), size=(self.mask_res, self.mask_res)
                                 )
                                 prior_pred = prior_pred * cls_mask_gt
                                 prior_target = prior_target * cls_mask_gt
@@ -1797,7 +1820,7 @@ class SpatialDreambooth:
                             cur_rgb = full_rgb if name == "" else full_rgb_raw
 
                             full_agg_attn = self.aggregate_attention(
-                                res=24,
+                                res=self.attn_res,
                                 from_where=("up", "down"),
                                 is_cross=True,
                                 select=idx,
@@ -1836,6 +1859,11 @@ class SpatialDreambooth:
 
         # save again
         if self.save_attn_mask_cache:
+            existed_masks = torch.load(cached_masks_path)
+            for filename in existed_masks.keys():
+                for mask_id in existed_masks[filename].keys():
+                    if mask_id not in self.attn_mask_cache[filename].keys():
+                        self.attn_mask_cache[filename][mask_id] = existed_masks[filename][mask_id]
             torch.save(self.attn_mask_cache, cached_masks_path)
 
     def save_adaptor(self, step=""):
@@ -1936,7 +1964,7 @@ class SpatialDreambooth:
         self.unet.eval()
         self.text_encoder.eval()
 
-        latents = torch.randn((2, 4, 96, 96), device=self.accelerator.device)
+        latents = torch.randn((2, 4, self.mask_res, self.mask_res), device=self.accelerator.device)
         uncond_input = self.tokenizer(
             ["", ""],
             padding="max_length",

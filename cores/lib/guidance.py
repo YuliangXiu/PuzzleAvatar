@@ -65,7 +65,7 @@ class StableDiffusion(nn.Module):
             model_key = hf_key
 
         if self.sd_version == '2-1':
-            base_model_key = "stabilityai/stable-diffusion-2-1"
+            base_model_key = "stabilityai/stable-diffusion-2-1-base"
         elif self.sd_version == '2-0':
             base_model_key = "stabilityai/stable-diffusion-2-base"
         elif self.sd_version == '1-5':
@@ -218,9 +218,7 @@ class StableDiffusion(nn.Module):
         latent_lst = []
 
         for idx in range(len(pred_rgb)):
-            pred_img = F.interpolate(
-                pred_rgb[idx], (512, 512), mode='bilinear', align_corners=False
-            )
+            pred_img = F.interpolate(pred_rgb[idx], (512, 512), mode='bicubic', align_corners=True)
             latent_lst.append(self.encode_imgs(pred_img))
 
         latents = torch.mean(torch.stack(latent_lst, dim=0), dim=0)
