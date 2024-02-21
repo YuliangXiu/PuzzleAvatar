@@ -1673,7 +1673,7 @@ class SpatialDreambooth:
                                 ).nonzero().item())
 
                                 # <asset>
-                                for offset in range(2):
+                                for offset in range(1):
                                     asset_attn_mask = agg_attn[..., asset_idx + offset]
                                     asset_attn_mask = (asset_attn_mask / asset_attn_mask.max())
 

@@ -8,6 +8,8 @@ model:
     render_ssaa: 4
 train:
     lr: 0.001
+    h: 768
+    w: 768
     iters: 10000
     tet_subdiv_steps: [5000]
     use_lap_loss: True

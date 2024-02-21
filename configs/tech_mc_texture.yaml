@@ -10,6 +10,8 @@ model:
     use_can_pose_space: False
 train:
     lock_geo: True
+    h: 768
+    w: 768
     lr: 0.001
     iters: 10000
     normal_sample_ratio: 0.
@@ -44,4 +46,4 @@ guidance:
     sd_version: 2-1
     use_view_prompt: True
     guidance_scale: 7.5
-    step_range: [0.02, 0.25]
+    step_range: [0.02, 0.50]

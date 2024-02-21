@@ -347,9 +347,10 @@ class Trainer(object):
                 # explicit negative dir-encoded text
                 text_z = self.guidance.get_text_embeds([text], [negative_text])
                 self.text_z.append(text_z)
+
             if self.cfg.train.face_sample_ratio > 0.:
                 self.face_text_z_novd = self.guidance.get_text_embeds([
-                    f"the face of {self.cfg.guidance.text}, {self.cfg.guidance.text_extra}"
+                    f"the face of {self.cfg.guidance.text_head}, {self.cfg.guidance.text_extra}"
                 ], [self.cfg.guidance.negative])
                 self.face_text_z = []
                 prompt = self.cfg.guidance.text_head if (
@@ -364,6 +365,7 @@ class Trainer(object):
                     # explicit negative dir-encoded text
                     text_z = self.guidance.get_text_embeds([text], [negative_text], is_face=True)
                     self.face_text_z.append(text_z)
+
             if (self.cfg.guidance.normal_text
                 is not None) and (len(self.cfg.guidance.normal_text) > 0):
                 print('get normal text prompt')
@@ -383,13 +385,15 @@ class Trainer(object):
                     # explicit negative dir-encoded text
                     text_z = self.guidance.get_text_embeds([text], [negative_text])
                     self.normal_text_z.append(text_z)
+
+                basic_prompt = self.cfg.guidance.text_head if (
+                    self.cfg.guidance.text_head is not None
+                ) and (len(self.cfg.guidance.text_head) > 0) else basic_prompt
+
                 self.face_normal_text_z_novd = self.guidance.get_text_embeds([
                     f"{self.cfg.guidance.normal_text} of the face of {basic_prompt}, {self.cfg.guidance.normal_text_extra}"
                 ], [self.cfg.guidance.negative_normal])
                 self.face_normal_text_z = []
-                basic_prompt = self.cfg.guidance.text_head if (
-                    self.cfg.guidance.text_head is not None
-                ) and (len(self.cfg.guidance.text_head) > 0) else basic_prompt
                 for d in ['front', 'side', 'back', 'side', 'overhead', 'bottom']:
                     # construct dir-encoded text
                     text = f"{self.cfg.guidance.normal_text} of the face of {basic_prompt}, {d} view, {self.cfg.guidance.normal_text_extra}"
@@ -415,13 +419,14 @@ class Trainer(object):
                     # explicit negative dir-encoded text
                     text_z = self.guidance.get_text_embeds([text], [negative_text])
                     self.textureless_text_z.append(text_z)
+
                 self.face_textureless_text_z_novd = self.guidance.get_text_embeds([
-                    f"{self.cfg.guidance.textureless_text} of the face of {self.cfg.guidance.text}, {self.cfg.guidance.textureless_text_extra}"
+                    f"{self.cfg.guidance.textureless_text} of the face of {self.cfg.guidance.text_head}, {self.cfg.guidance.textureless_text_extra}"
                 ], [self.cfg.guidance.negative_textureless])
                 self.face_textureless_text_z = []
                 for d in ['front', 'side', 'back', 'side', 'overhead', 'bottom']:
                     # construct dir-encoded text
-                    text = f"{self.cfg.guidance.textureless_text} of the face of {self.cfg.guidance.text}, {d} view, {self.cfg.guidance.textureless_text_extra}"
+                    text = f"{self.cfg.guidance.textureless_text} of the face of {self.cfg.guidance.text_head}, {d} view, {self.cfg.guidance.textureless_text_extra}"
 
                     negative_text = f"{self.cfg.guidance.negative_textureless}"
 
@@ -487,21 +492,6 @@ class Trainer(object):
         pred_depth = outputs['depth'].reshape(1, H, W)
 
         pred_norm = None
-
-        # if self.cfg.stage == 'texture' and self.epoch < 2:
-
-        #     outputs_normal = self.model(
-        #         rays_o,
-        #         rays_d,
-        #         mvp,
-        #         H,
-        #         W,
-        #         poses=poses,
-        #         ambient_ratio=0.1,
-        #         shading='normal',
-        #         global_step=self.global_step
-        #     )
-        #     pred_norm = outputs_normal['image'].reshape(1, H, W, 3).permute(0, 3, 1, 2).contiguous()
 
         if self.cfg.train.lambda_depth > 0:
             depth_loss = total_variation(pred_depth, reduction='mean')

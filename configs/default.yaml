@@ -45,8 +45,8 @@ train:
   lock_geo: False
   fp16: False
   render_ssaa: 4
-  w: 512
-  h: 512
+  w: 768
+  h: 768
 
   iters: 0
   lr: 0.001

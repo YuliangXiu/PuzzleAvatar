@@ -43,6 +43,7 @@ def dict_to_prompt(d, use_shape=False):
     wear_classes = [cls for cls in classes if cls not in facial_classes]
 
     prompt = f"{prompt_head}, "
+    with_prompt = f"{prompt_head}, "
 
     for class_token in with_classes:
         idx = classes.index(class_token)
@@ -54,8 +55,10 @@ def dict_to_prompt(d, use_shape=False):
 
         if use_shape:
             prompt += f"{tokens[idx]} {descs[idx]} {class_token}{ending}"
+            with_prompt += f"{tokens[idx]} {descs[idx]} {class_token}{ending}"
         else:
             prompt += f"{tokens[idx]} {class_token}{ending}"
+            with_prompt += f"{tokens[idx]} {class_token}{ending}"
 
     if len(wear_classes) > 0:
         prompt += "wearing "
@@ -75,7 +78,7 @@ def dict_to_prompt(d, use_shape=False):
             else:
                 prompt += f"{tokens[idx]} {class_token}{ending}"
 
-    return d['gender'], prompt, tokens
+    return d['gender'], prompt, with_prompt, tokens
 
 
 # torch.autograd.set_detect_anomaly(True)
@@ -108,11 +111,12 @@ if __name__ == '__main__':
             os.path.join(opt.exp_dir.replace("results", "data"), 'gpt4v_response.json'), 'r'
         ) as f:
             gpt4v_response = json.load(f)
-            gender, cfg.guidance.text, placeholders = dict_to_prompt(
+            gender, cfg.guidance.text, cfg.guidance.text_head, placeholders = dict_to_prompt(
                 gpt4v_response, opt.use_shape_description
             )
 
             print(f"Using prompt: {cfg.guidance.text}")
+            print(f"Using head prompt: {cfg.guidance.text_head}")
 
     # create smplx base meshes wrt gender
     smplx_path = os.path.join(opt.exp_dir.replace("results", "data"), f"smplx_{gender}.obj")
@@ -219,6 +223,7 @@ if __name__ == '__main__':
         train_loader = ViewDataset(
             cfg, device=device, type='train', H=cfg.train.h, W=cfg.train.w, size=100
         ).dataloader()
+
         params_list = list()
         if cfg.guidance.type == 'stable-diffusion':
             from cores.lib.guidance import StableDiffusion

@@ -9,6 +9,6 @@ request_memory = 20000
 request_disk = 5G
 request_cpus = 8
 request_gpus = 1
-requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDAGlobalMemoryMb > 40000 && CUDADeviceName =!= "NVIDIA H100" && CUDADeviceName =!= "NVIDIA H100 80GB HBM3")
+requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDAGlobalMemoryMb > 60000 && CUDADeviceName =!= "NVIDIA H100" && CUDADeviceName =!= "NVIDIA H100 80GB HBM3")
 
 queue dir,subject,outfit from ./clusters/subjects.txt

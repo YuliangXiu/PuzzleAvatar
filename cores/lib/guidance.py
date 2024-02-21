@@ -57,6 +57,8 @@ class StableDiffusion(nn.Module):
         self.sd_version = sd_version
         self.placeholders = placeholders
         self.use_peft = use_peft
+        self.base_model_key = None
+        self.res = 768
 
         print(f'[INFO] loading stable diffusion...')
 
@@ -65,18 +67,23 @@ class StableDiffusion(nn.Module):
             model_key = hf_key
 
         if self.sd_version == '2-1':
-            base_model_key = "stabilityai/stable-diffusion-2-1-base"
+            self.base_model_key = "stabilityai/stable-diffusion-2-1"
         elif self.sd_version == '2-0':
-            base_model_key = "stabilityai/stable-diffusion-2-base"
+            self.base_model_key = "stabilityai/stable-diffusion-2-base"
         elif self.sd_version == '1-5':
-            base_model_key = "runwayml/stable-diffusion-v1-5"
+            self.base_model_key = "runwayml/stable-diffusion-v1-5"
         else:
             raise ValueError(f'Stable-diffusion version {self.sd_version} not supported.')
+
+        if 'base' in self.base_model_key:
+            self.res = 512
+        else:
+            self.res = 768
 
         if self.use_peft != 'none':
 
             pipe = DiffusionPipeline.from_pretrained(
-                base_model_key,
+                self.base_model_key,
                 torch_dtype=torch.float32,
                 requires_safety_checker=False,
             ).to(self.device)
@@ -130,7 +137,7 @@ class StableDiffusion(nn.Module):
             self.text_encoder_head = self.text_encoder
             self.unet_head = self.unet
 
-        self.scheduler = DDIMScheduler.from_pretrained(base_model_key, subfolder="scheduler")
+        self.scheduler = DDIMScheduler.from_pretrained(self.base_model_key, subfolder="scheduler")
 
         self.num_train_timesteps = self.scheduler.config.num_train_timesteps
         self.min_step = int(self.num_train_timesteps * sd_step_range[0])
@@ -206,7 +213,7 @@ class StableDiffusion(nn.Module):
 
         if controlnet_hint:
             assert self.controlnet is not None
-            controlnet_hint = self.controlnet_hint_conversion(controlnet_hint, 512, 512)
+            controlnet_hint = self.controlnet_hint_conversion(controlnet_hint, self.res, self.res)
         # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
 
         # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
@@ -218,7 +225,10 @@ class StableDiffusion(nn.Module):
         latent_lst = []
 
         for idx in range(len(pred_rgb)):
-            pred_img = F.interpolate(pred_rgb[idx], (512, 512), mode='bicubic', align_corners=True)
+
+            pred_img = F.interpolate(
+                pred_rgb[idx], (self.res, self.res), mode='bilinear', align_corners=False
+            )
             latent_lst.append(self.encode_imgs(pred_img))
 
         latents = torch.mean(torch.stack(latent_lst, dim=0), dim=0)
