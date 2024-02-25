@@ -731,7 +731,6 @@ class DreamBoothDataset(Dataset):
         num_of_tokens = random.randrange(1, len(self.placeholder_tokens[index % example_len]) + 1)
         sample_prop = np.ones(len(self.class_tokens[index % example_len]))
 
-        # human cares too much on head
         for attn_cls in ['face', 'haircut']:
             if attn_cls in self.class_tokens[index % example_len]:
                 sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 2.0

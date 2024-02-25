@@ -91,6 +91,10 @@
         {
             "filePath": "logs/human/yuliang/run.err",
             "group": "Default"
+        },
+        {
+            "filePath": "logs/human/yuliang/train_texture.err",
+            "group": "Default"
         }
     ]
 }

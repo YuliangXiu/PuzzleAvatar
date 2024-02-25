@@ -10,8 +10,8 @@ train:
     lr: 0.001
     h: 768
     w: 768
-    iters: 10000
-    tet_subdiv_steps: [5000]
+    iters: 8000
+    tet_subdiv_steps: [3000]
     use_lap_loss: True
     normal_sample_ratio: 1.0
     radius_range: [0.7, 1.3]
@@ -25,9 +25,9 @@ train:
     face_theta_range: [90, 90]
     face_phi_range: [-90, 90]
     render_relative_normal: True
-    lambda_lap: 1e4
+    lambda_lap: 1e5
     lambda_depth: 1e2
-    lambda_eik: 1e4
+    lambda_eik: 1e5
     lambda_sil: 0.
     lambda_normal: 0.
     lambda_recon: 0.
@@ -45,4 +45,4 @@ guidance:
     normal_text: "a smooth and detailed sculpture of"
     use_view_prompt: True
     guidance_scale: 7.5
-    step_range: [0.02, 0.15]
+    step_range: [0.02, 0.25]

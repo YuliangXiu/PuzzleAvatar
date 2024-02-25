@@ -78,7 +78,7 @@ def dict_to_prompt(d, use_shape=False):
             else:
                 prompt += f"{tokens[idx]} {class_token}{ending}"
 
-    return d['gender'], prompt, with_prompt, tokens
+    return d['gender'], prompt, prompt, tokens
 
 
 # torch.autograd.set_detect_anomaly(True)

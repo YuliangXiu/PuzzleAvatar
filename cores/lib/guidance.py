@@ -211,8 +211,7 @@ class StableDiffusion(nn.Module):
         else:
             unet = self.unet
 
-        if controlnet_hint:
-            assert self.controlnet is not None
+        if controlnet_hint is not None:
             controlnet_hint = self.controlnet_hint_conversion(controlnet_hint, self.res, self.res)
         # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
 
@@ -222,16 +221,16 @@ class StableDiffusion(nn.Module):
         )
 
         # encode image into latents with vae, requires grad!
-        latent_lst = []
+        pred_lst = []
 
         for idx in range(len(pred_rgb)):
 
             pred_img = F.interpolate(
                 pred_rgb[idx], (self.res, self.res), mode='bilinear', align_corners=False
             )
-            latent_lst.append(self.encode_imgs(pred_img))
+            pred_lst.append(pred_img)
 
-        latents = torch.mean(torch.stack(latent_lst, dim=0), dim=0)
+        latents = self.encode_imgs(torch.mean(torch.stack(pred_lst, dim=0), dim=0))
 
         # predict the noise residual with unet, NO grad!
         with torch.no_grad():

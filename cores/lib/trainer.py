@@ -201,6 +201,7 @@ class Trainer(object):
             self.lpips_model = LPIPS(net='vgg').cuda()
             for param in self.lpips_model.parameters():
                 param.requires_grad = False
+
         if self.cfg.guidance.controlnet_guidance_geometry:
             if self.cfg.guidance.controlnet_guidance_geometry == 'hed':
                 self.controlnet_annotator = HEDdetector()
@@ -208,6 +209,7 @@ class Trainer(object):
                 self.controlnet_annotator = Cannydetector(100, 200)
             else:
                 raise NotImplementedError
+
         self.render_openpose_training = self.cfg.guidance.controlnet_openpose_guidance
         self.render_openpose = self.cfg.guidance.controlnet_openpose_guidance
 
@@ -493,6 +495,21 @@ class Trainer(object):
 
         pred_norm = None
 
+        # if self.cfg.stage == 'texture' and self.epoch < 2:
+
+        #     outputs_normal = self.model(
+        #         rays_o,
+        #         rays_d,
+        #         mvp,
+        #         H,
+        #         W,
+        #         poses=poses,
+        #         ambient_ratio=0.1,
+        #         shading='normal',
+        #         global_step=self.global_step
+        #     )
+        #     pred_norm = outputs_normal['image'].reshape(1, H, W, 3).permute(0, 3, 1, 2).contiguous()
+
         if self.cfg.train.lambda_depth > 0:
             depth_loss = total_variation(pred_depth, reduction='mean')
             loss += depth_loss * self.cfg.train.lambda_depth
@@ -542,6 +559,7 @@ class Trainer(object):
             text_z,
             pred_lst,
             guidance_scale=self.cfg.guidance.guidance_scale,
+            controlnet_hint=pred_norm if self.cfg.stage == 'texture' else None,
             poses=data['poses'],
             text_embedding_novd=text_z_novd,
             is_face=is_face

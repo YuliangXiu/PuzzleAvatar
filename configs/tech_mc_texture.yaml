@@ -45,5 +45,6 @@ data:
 guidance:
     sd_version: 2-1
     use_view_prompt: True
+    controlnet: "thibaud/controlnet-sd21-normalbae-diffusers"
     guidance_scale: 7.5
-    step_range: [0.02, 0.50]
+    step_range: [0.02, 0.98]
