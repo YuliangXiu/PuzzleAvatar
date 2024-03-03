@@ -68,6 +68,8 @@ check_min_version("0.12.0")
 
 logger = get_logger(__name__)
 
+logging.getLogger("wandb").setLevel(logging.ERROR)
+
 UNET_TARGET_MODULES = [
     "to_q", "to_v", "to_k", "proj_in", "proj_out", "to_out.0", "add_k_proj", "add_v_proj",
     "ff.net.2"
@@ -300,10 +302,19 @@ def parse_args():
     parser.add_argument(
         "--lr_scheduler",
         type=str,
-        default="constant",
+        default="piecewise_constant",
         help=(
             'The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
-            ' "constant", "constant_with_warmup"]'
+            ' "constant", "constant_with_warmup", "piecewise_constant"]'
+        ),
+    )
+    parser.add_argument(
+        "--lr_step_rules",
+        type=str,
+        default="1:2000,0.1",
+        help=(
+            "A list of tuples, where each tuple contains the epoch and the learning rate to use at that epoch. The"
+            " learning rate will be kept constant after the last epoch."
         ),
     )
     parser.add_argument(
@@ -1067,7 +1078,7 @@ class SpatialDreambooth:
         self.validation_scheduler = DDIMScheduler.from_pretrained(
             self.args.pretrained_model_name_or_path, subfolder="scheduler"
         )
-        self.validation_scheduler.set_timesteps(50)
+        self.validation_scheduler.set_timesteps(30)
 
         # We start by only optimizing the embeddings
         self.vae.requires_grad_(False)
@@ -1293,7 +1304,7 @@ class SpatialDreambooth:
             overrode_max_train_steps = True
 
         lr_scheduler = get_scheduler(
-            self.args.lr_scheduler,
+            "constant",
             optimizer=optimizer,
             num_warmup_steps=self.args.lr_warmup_steps * self.args.gradient_accumulation_steps,
             num_training_steps=self.args.max_train_steps * self.args.gradient_accumulation_steps,
@@ -1507,6 +1518,7 @@ class SpatialDreambooth:
                     lr_scheduler = get_scheduler(
                         self.args.lr_scheduler,
                         optimizer=optimizer,
+                        step_rules=self.args.lr_step_rules,
                         num_warmup_steps=self.args.lr_warmup_steps *
                         self.args.gradient_accumulation_steps,
                         num_training_steps=self.args.max_train_steps *

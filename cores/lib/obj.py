@@ -303,7 +303,7 @@ class Mesh():
     def auto_normal(self):
         i0, i1, i2 = self.f[:, 0].long(), self.f[:, 1].long(), self.f[:, 2].long()
         v0, v1, v2 = self.v[i0, :], self.v[i1, :], self.v[i2, :]
-        face_normals = torch.cross(v1 - v0, v2 - v0)
+        face_normals = torch.cross(v1 - v0, v2 - v0, dim=1)
 
         # Splat face normals to vertices
         vn = torch.zeros_like(self.v)
@@ -323,28 +323,20 @@ class Mesh():
         self.fn = self.f
 
     def auto_uv(self, cache_path=None):
+        
         print('[INFO] Using atlas to calculate UV. It takes 10~20min.')
         # try to load cache
-        if cache_path is not None:
-            cache_path = cache_path.replace('.obj', '_uv.npz')
-        if cache_path and os.path.exists(cache_path):
-            data = np.load(cache_path)
-            vt_np, ft_np = data['vt'], data['ft']
-        else:
 
-            import xatlas
-            v_np = self.v.cpu().numpy() * 100
-            f_np = self.f.int().cpu().numpy()
-            atlas = xatlas.Atlas()
-            atlas.add_mesh(v_np, f_np)
-            chart_options = xatlas.ChartOptions()
-            chart_options.max_iterations = 4
-            atlas.generate(chart_options=chart_options)
-            vmapping, ft_np, vt_np = atlas[0]    # [N], [M, 3], [N, 2]
-
-            # save to cache
-            if cache_path:
-                np.savez(cache_path, vt=vt_np, ft=ft_np)
+        import xatlas
+        v_np = self.v.cpu().numpy() * 100
+        f_np = self.f.int().cpu().numpy()
+        atlas = xatlas.Atlas()
+        atlas.add_mesh(v_np, f_np)
+        chart_options = xatlas.ChartOptions()
+        chart_options.max_iterations = 1
+        chart_options.max_cost = 10.0
+        atlas.generate(chart_options=chart_options)
+        vmapping, ft_np, vt_np = atlas[0]    # [N], [M, 3], [N, 2]
 
         vt = torch.from_numpy(vt_np.astype(np.float32)).to(self.device)
         ft = torch.from_numpy(ft_np.astype(np.int32)).to(self.device)
@@ -365,14 +357,18 @@ class Mesh():
 
         mtl_path = path.replace('.obj', '.mtl')
         albedo_path = path.replace('.obj', '_albedo.png')
+
         v_np = self.v.cpu().numpy()
         vt_np = self.vt.cpu().numpy() if self.vt is not None else None
         vn_np = self.vn.cpu().numpy() if self.vn is not None else None
+
         f_np = self.f.cpu().numpy()
         ft_np = self.ft.cpu().numpy() if self.ft is not None else None
         fn_np = self.fn.cpu().numpy() if self.fn is not None else None
+
         vc_np = self.v_color.cpu().numpy() if self.v_color is not None else None
         print(f'vertice num: {len(v_np)}, face num: {len(f_np)}')
+        print(f'f_num: {f_np.shape}, ft_num: {ft_np.shape}, fn_num: {fn_np.shape}')
 
         with open(path, "w") as fp:
             fp.write(f'mtllib {os.path.basename(mtl_path)} \n')
@@ -390,11 +386,14 @@ class Mesh():
                         fp.write(f'vn {v[0]} {v[1]} {v[2]} \n')
             if vt_np is not None:
                 fp.write(f'usemtl defaultMat \n')
+
                 for i in range(len(f_np)):
+                    f_np_cur = f_np[i] + 1
+                    ft_np_cur = ft_np[i] + 1 if ft_np is not None else ""
+                    fn_np_cur = fn_np[i] + 1 if fn_np is not None else ""
+
                     fp.write(
-                        f'f {f_np[i, 0] + 1}/{ft_np[i, 0] + 1 if ft_np is not None else ""}/{fn_np[i, 0] + 1 if fn_np is not None else ""} \
-                                {f_np[i, 1] + 1}/{ft_np[i, 1] + 1 if ft_np is not None else ""}/{fn_np[i, 1] + 1 if fn_np is not None else ""} \
-                                {f_np[i, 2] + 1}/{ft_np[i, 2] + 1 if ft_np is not None else ""}/{fn_np[i, 2] + 1 if fn_np is not None else ""} \n'
+                        f'f {f_np_cur[0]}/{ft_np_cur[0]}/{fn_np_cur[0]} {fn_np_cur[1]}/{ft_np_cur[1]}/{fn_np_cur[1]} {fn_np_cur[2]}/{ft_np_cur[2]}/{fn_np_cur[2]} \n'
                     )
             else:
                 for i in range(len(f_np)):

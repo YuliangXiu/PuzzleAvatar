@@ -118,6 +118,10 @@ class BreakASceneInference:
                 torch_dtype=torch.float32,
                 requires_safety_checker=False,
             )
+            
+            self.pipeline.scheduler = DDIMScheduler.from_pretrained(
+                self.args.pretrained_model_name_or_path, subfolder="scheduler"
+            )
 
         num_added_tokens = self.pipeline.tokenizer.add_tokens(self.tokens)
         print(f"Added {num_added_tokens} tokens")
@@ -240,6 +244,6 @@ if __name__ == "__main__":
         prompts.append(prompt)
         prompts.append(prompt_raw)
 
-    print(prompts)
+    # print(prompts)
 
     break_a_scene_inference.infer_and_save(prompts=prompts, tokens=tokens)

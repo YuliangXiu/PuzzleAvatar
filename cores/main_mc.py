@@ -5,6 +5,7 @@ import os
 
 import torch
 import trimesh
+import logging
 from yacs.config import CfgNode as CN
 
 from cores.lib.provider import ViewDataset
@@ -13,6 +14,9 @@ from cores.lib.trainer import *
 from utils.body_utils.lib import smplx
 from utils.body_utils.lib.dataset.mesh_util import SMPLX
 
+torch.set_float32_matmul_precision('high')
+torch._dynamo.config.verbose=False
+logging.getLogger("torch._dynamo").setLevel(logging.CRITICAL)
 
 def load_config(path, default_path=None):
     cfg = CN(new_allowed=True)
@@ -234,6 +238,8 @@ if __name__ == '__main__':
                 cfg.guidance.sd_version,
                 cfg.guidance.hf_key,
                 cfg.guidance.step_range,
+                cfg.train.tet_subdiv_steps,
+                cfg.train.iters,
                 controlnet=cfg.guidance.controlnet,
                 lora=cfg.guidance.lora,
                 cfg=cfg,

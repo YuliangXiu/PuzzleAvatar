@@ -1,6 +1,6 @@
 ## Environment setup
 
-#### Ubuntu 22.04.3 LTS, NVIDIA A100 (80GB), CUDA=11.7
+#### Ubuntu 22.04.3 LTS, NVIDIA A100/H100 (80GB), CUDA=12.1
 
 1. Install system packages
 
@@ -13,7 +13,9 @@ apt-get install -y libglfw3-dev libgles2-mesa-dev libglib2.0-0 libosmesa6-dev
 ```bash
 conda create --name TeCH python=3.10
 conda activate TeCH
-conda install pytorch torchvision tobarchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+
+# export TORCH_CUDA_ARCH_LIST="7.0,7.2,7.5,8.0,8.6,8.7,8.9,9.0,9.0a"
+pip install pytorch torchvision tobarchaudio
 pip install -r requirements.txt
 python install_pytorch3d.py
 IGNORE_TORCH_VER=1 pip install git+https://github.com/NVIDIAGameWorks/kaolin.git
@@ -25,16 +27,16 @@ IGNORE_TORCH_VER=1 pip install git+https://github.com/NVIDIAGameWorks/kaolin.git
 git clone --recurse-submodules git@github.com:YuliangXiu/PuzzleAvatar.git
 
 cd cores/lib/freqencoder
-python setup.py install
+pip install -e .
 
 cd ../gridencoder
-python setup.py install
+pip install -e .
 
 cd ../../thirdparties/nvdiffrast
-python setup.py install
+pip install -e .
 
 cd ../../thirdparties/peft
-python setup.py install
+pip install -e .
 
 bash scripts/install_dino_sam.sh
 ```

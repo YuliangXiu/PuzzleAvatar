@@ -4,7 +4,7 @@ boto3
 chumpy
 dataclasses
 dearpygui
-diffusers==0.15.0
+diffusers
 einops
 imageio-ffmpeg
 imageio
@@ -56,7 +56,7 @@ sentencepiece
 deepspeed
 flash_attn
 openpyxl
-git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers
+xformers
 git+https://github.com/openai/CLIP.git@main#egg=clip
 git+https://github.com/marian42/mesh_to_sdf.git
 git+https://github.com/YuliangXiu/taming-transformers.git

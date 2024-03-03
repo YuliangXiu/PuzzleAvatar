@@ -6,6 +6,7 @@ logging.set_verbosity_error()
 
 import numpy as np
 import PIL
+import os
 from os.path import join
 import torch
 import torch.nn as nn
@@ -46,6 +47,8 @@ class StableDiffusion(nn.Module):
         sd_version='2-1',
         hf_key=None,
         sd_step_range=[0.2, 0.98],
+        subdiv_step=[3000],
+        iters=8000,
         controlnet=None,
         lora=None,
         cfg=None,
@@ -59,6 +62,9 @@ class StableDiffusion(nn.Module):
         self.use_peft = use_peft
         self.base_model_key = None
         self.res = 768
+        self.sd_step_range = sd_step_range
+        self.subdiv_step = subdiv_step
+        self.iters = iters
 
         print(f'[INFO] loading stable diffusion...')
 
@@ -67,7 +73,9 @@ class StableDiffusion(nn.Module):
             model_key = hf_key
 
         if self.sd_version == '2-1':
-            self.base_model_key = "stabilityai/stable-diffusion-2-1"
+            self.base_model_key = os.environ.get(
+                'BASE_MODEL', "stabilityai/stable-diffusion-2-1-base"
+            )
         elif self.sd_version == '2-0':
             self.base_model_key = "stabilityai/stable-diffusion-2-base"
         elif self.sd_version == '1-5':
@@ -155,7 +163,7 @@ class StableDiffusion(nn.Module):
         print(f'[INFO] loaded stable diffusion!')
 
     def get_text_embeds(self, prompt, negative_prompt, is_face=False):
-        print('text prompt: [positive]', prompt, '[negative]', negative_prompt)
+        # print('text prompt: [positive]', prompt, '[negative]', negative_prompt)
         if not is_face:
             tokenizer = self.tokenizer
             text_encoder = self.text_encoder
@@ -203,6 +211,7 @@ class StableDiffusion(nn.Module):
         controlnet_hint=None,
         controlnet_conditioning_scale=1.0,
         is_face=False,
+        cur_epoch=0,
         **kwargs
     ):
 
@@ -216,6 +225,16 @@ class StableDiffusion(nn.Module):
         # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
 
         # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
+
+        if self.subdiv_step is not None:
+            epoch_num = self.iters // 100
+            subdiv_num = self.subdiv_step[0] // 100
+
+            if cur_epoch >= subdiv_num:
+                epoch_progress = (cur_epoch - subdiv_num) / (epoch_num - subdiv_num)
+                new_max_step_range = 0.25 + (self.sd_step_range[1] - 0.25) * (1.0 - epoch_progress)
+                self.max_step = int(self.num_train_timesteps * new_max_step_range)
+
         t = torch.randint(
             self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device
         )

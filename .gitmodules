@@ -12,5 +12,5 @@
 	ignore = dirty
 [submodule "thirdparties/peft"]
 	path = thirdparties/peft
-	url = git@github.com:yuliangxiu/peft.git
+	url = git@github.com:yfeng95/peft.git
 	ignore = dirty

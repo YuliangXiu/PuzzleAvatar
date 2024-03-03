@@ -10,8 +10,8 @@ model:
     use_can_pose_space: False
 train:
     lock_geo: True
-    h: 768
-    w: 768
+    h: 512
+    w: 512
     lr: 0.001
     iters: 10000
     normal_sample_ratio: 0.
@@ -19,7 +19,7 @@ train:
     height_range: [-0.4, 0.4]
     theta_range: [60, 120]
     phi_diff: 30
-    face_sample_ratio: 0.5
+    face_sample_ratio: 0.3
     face_height_range: [0., 0.]
     face_radius_range: [0.3, 0.4]
     face_phi_diff: 30
@@ -34,6 +34,7 @@ train:
     crop_for_lpips: true
 test:
     save_mesh: true
+    save_uv: True
     test: False
 data:
     load_input_image: False
@@ -45,6 +46,5 @@ data:
 guidance:
     sd_version: 2-1
     use_view_prompt: True
-    controlnet: "thibaud/controlnet-sd21-normalbae-diffusers"
     guidance_scale: 7.5
     step_range: [0.02, 0.98]

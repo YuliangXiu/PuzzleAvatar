@@ -284,6 +284,7 @@ class Renderer(nn.Module):
 
     @torch.no_grad()
     def export_mesh(self, save_path, name='mesh', export_uv=False):
+        
         self.resize_matrix_inv = self.mesh.resize_matrix_inv
         if self.dmtet_network is not None:
             num_subdiv = self.get_num_subdiv()
@@ -300,6 +301,7 @@ class Renderer(nn.Module):
         else:
             self.mesh.v = self.mesh.v
             self.mesh.vn = self.mesh.vn
+            
         if export_uv:
             if self.cfg.model.use_vertex_tex:
                 self.mesh.v_color = self.vertex_albedo.detach().clamp(0, 1)
@@ -311,6 +313,7 @@ class Renderer(nn.Module):
                           dim=1) @ self.resize_matrix_inv.T
         self.mesh.v = verts
         self.mesh.write(os.path.join(save_path, '{}.obj'.format(name)))
+        
         if self.cfg.data.da_pose_mesh:
             import trimesh
             verts = self.mesh.v.new_tensor(trimesh.load(self.cfg.data.da_pose_mesh).vertices)

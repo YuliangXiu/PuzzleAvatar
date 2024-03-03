@@ -12,7 +12,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
-from kornia.losses import total_variation
 import tqdm
 from PIL import Image
 from rich.console import Console
@@ -495,26 +494,6 @@ class Trainer(object):
 
         pred_norm = None
 
-        # if self.cfg.stage == 'texture' and self.epoch < 2:
-
-        #     outputs_normal = self.model(
-        #         rays_o,
-        #         rays_d,
-        #         mvp,
-        #         H,
-        #         W,
-        #         poses=poses,
-        #         ambient_ratio=0.1,
-        #         shading='normal',
-        #         global_step=self.global_step
-        #     )
-        #     pred_norm = outputs_normal['image'].reshape(1, H, W, 3).permute(0, 3, 1, 2).contiguous()
-
-        if self.cfg.train.lambda_depth > 0:
-            depth_loss = total_variation(pred_depth, reduction='mean')
-            loss += depth_loss * self.cfg.train.lambda_depth
-            loss_dict['depth_loss'] = f"{depth_loss.item() * self.cfg.train.lambda_depth}:.5f"
-
         if step_mesh is None:
             step_mesh = outputs['mesh']
 
@@ -559,10 +538,12 @@ class Trainer(object):
             text_z,
             pred_lst,
             guidance_scale=self.cfg.guidance.guidance_scale,
-            controlnet_hint=pred_norm if self.cfg.stage == 'texture' else None,
+            controlnet_hint=pred_norm if (self.cfg.stage == 'texture') and
+            (self.cfg.guidance.controlnet != None) else None,
             poses=data['poses'],
             text_embedding_novd=text_z_novd,
-            is_face=is_face
+            is_face=is_face,
+            cur_epoch=self.epoch,
         )
 
         loss += guidance_loss
@@ -799,6 +780,18 @@ class Trainer(object):
             all_preds_depth = []
             all_preds_norm = []
             all_openpose_map = []
+
+        # save front image for comparison
+        if "PuzzleIOI" in save_path:
+            from shutil import copyfile
+            subject, outfit = save_path.split("/")[3:5]
+            src_front_image = os.path.join(
+                "data", "PuzzleIOI", "fitting", subject, outfit, "images", "07_C.jpg"
+            )
+            tgt_front_image = os.path.join(save_path, "full-body.jpg")
+            copyfile(src_front_image, tgt_front_image)
+
+            self.log(f"Copyfile {src_front_image} ==> {tgt_front_image}")
 
         with torch.no_grad():
             mesh = None
