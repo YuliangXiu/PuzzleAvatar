@@ -43,6 +43,7 @@ from accelerate.utils import set_seed
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
+    PNDMScheduler,
     DiffusionPipeline,
     UNet2DConditionModel,
 )
@@ -744,7 +745,7 @@ class DreamBoothDataset(Dataset):
 
         for attn_cls in ['face', 'haircut']:
             if attn_cls in self.class_tokens[index % example_len]:
-                sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 2.0
+                sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 1.3
 
         sample_prop /= sample_prop.sum()
 
@@ -1017,7 +1018,7 @@ class SpatialDreambooth:
         )
 
         # Load scheduler and models
-        self.noise_scheduler = DDIMScheduler.from_pretrained(
+        self.noise_scheduler = PNDMScheduler.from_pretrained(
             self.args.pretrained_model_name_or_path, subfolder="scheduler"
         )
         self.text_encoder = text_encoder_cls.from_pretrained(
@@ -1075,10 +1076,17 @@ class SpatialDreambooth:
                                                                    self.args.num_of_assets]
 
         # Set validation scheduler for logging
-        self.validation_scheduler = DDIMScheduler.from_pretrained(
+        # self.validation_scheduler = DDIMScheduler(
+        #     beta_start=0.00085,
+        #     beta_end=0.012,
+        #     beta_schedule="scaled_linear",
+        #     clip_sample=False,
+        #     set_alpha_to_one=False,
+        # )
+        self.validation_scheduler = PNDMScheduler.from_pretrained(
             self.args.pretrained_model_name_or_path, subfolder="scheduler"
         )
-        self.validation_scheduler.set_timesteps(30)
+        self.validation_scheduler.set_timesteps(50)
 
         # We start by only optimizing the embeddings
         self.vae.requires_grad_(False)

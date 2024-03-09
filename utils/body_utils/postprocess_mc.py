@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import trimesh
 from glob import glob
-from lib.dataset.mesh_util import SMPLX, remesh_laplacian, keep_largest, poisson
+from lib.dataset.mesh_util import SMPLX, mesh_simplify, keep_largest, poisson
 from scipy.spatial import cKDTree
 
 # loading cfg file
@@ -45,3 +45,4 @@ smplx_hand.remove_unreferenced_vertices()
 # combine Tech's body and SMPL-X's hands
 tech_new = sum([tech_body, smplx_hand])
 tech_new_obj = poisson(tech_new, tech_path.replace("geometry", "geometry_final"), depth=10)
+mesh_simplify(tech_path.replace("geometry", "geometry_final"))

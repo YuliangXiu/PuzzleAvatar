@@ -27,6 +27,7 @@ from peft import PeftModel
 
 negative_prompt = 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, dark, low-resolution, gloomy, shadow, worst quality, jpeg artifacts, poorly drawn, dehydrated, noisy, poorly drawn, bad proportions, bad anatomy, bad lighting, bad composition, bad framing, fused fingers, noisy, duplicate characters'
 
+
 class BreakASceneInference:
     def __init__(self):
 
@@ -91,9 +92,13 @@ class BreakASceneInference:
                 requires_safety_checker=False,
             )
 
-            self.pipeline.scheduler = DDIMScheduler.from_pretrained(
-                self.args.pretrained_model_name_or_path, subfolder="scheduler"
-            )
+            # self.pipeline.scheduler = DDIMScheduler(
+            #     beta_start=0.00085,
+            #     beta_end=0.012,
+            #     beta_schedule="scaled_linear",
+            #     clip_sample=False,
+            #     set_alpha_to_one=False,
+            # )
 
             num_added_tokens = self.pipeline.tokenizer.add_tokens(self.tokens)
             print(f"Added {num_added_tokens} tokens")
@@ -118,10 +123,14 @@ class BreakASceneInference:
                 torch_dtype=torch.float32,
                 requires_safety_checker=False,
             )
-            
-            self.pipeline.scheduler = DDIMScheduler.from_pretrained(
-                self.args.pretrained_model_name_or_path, subfolder="scheduler"
-            )
+
+            # self.pipeline.scheduler = DDIMScheduler(
+            #     beta_start=0.00085,
+            #     beta_end=0.012,
+            #     beta_schedule="scaled_linear",
+            #     clip_sample=False,
+            #     set_alpha_to_one=False,
+            # )
 
         num_added_tokens = self.pipeline.tokenizer.add_tokens(self.tokens)
         print(f"Added {num_added_tokens} tokens")
@@ -153,7 +162,7 @@ class BreakASceneInference:
                 prompt_group,
                 negative_prompt=[negative_prompt] * batch_size,
                 guidance_scale=7.5,
-                num_inference_steps=30
+                num_inference_steps=50
             ).images
 
             for idx in range(len(images)):

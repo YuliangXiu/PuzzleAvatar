@@ -1,12 +1,221 @@
 import os
-import sys
 import trimesh
 import numpy as np
-from tqdm import tqdm
-from glob import glob
 from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 import pyrender
+from glob import glob
+
+import torch
+from typing import Tuple
+
+from pytorch3d import _C
+from pytorch3d.ops.mesh_face_areas_normals import mesh_face_areas_normals
+from pytorch3d.ops.packed_to_padded import packed_to_padded
+from pytorch3d.structures import Pointclouds
+from torch.autograd import Function
+from torch.autograd.function import once_differentiable
+from pytorch3d.structures import Meshes
+
+_DEFAULT_MIN_TRIANGLE_AREA: float = 5e-3
+
+
+# PointFaceDistance
+class _PointFaceDistance(Function):
+    """
+    Torch autograd Function wrapper PointFaceDistance Cuda implementation
+    """
+    @staticmethod
+    def forward(
+        ctx,
+        points,
+        points_first_idx,
+        tris,
+        tris_first_idx,
+        max_points,
+        min_triangle_area=_DEFAULT_MIN_TRIANGLE_AREA,
+    ):
+        """
+        Args:
+            ctx: Context object used to calculate gradients.
+            points: FloatTensor of shape `(P, 3)`
+            points_first_idx: LongTensor of shape `(N,)` indicating the first point
+                index in each example in the batch
+            tris: FloatTensor of shape `(T, 3, 3)` of triangular faces. The `t`-th
+                triangular face is spanned by `(tris[t, 0], tris[t, 1], tris[t, 2])`
+            tris_first_idx: LongTensor of shape `(N,)` indicating the first face
+                index in each example in the batch
+            max_points: Scalar equal to maximum number of points in the batch
+            min_triangle_area: (float, defaulted) Triangles of area less than this
+                will be treated as points/lines.
+        Returns:
+            dists: FloatTensor of shape `(P,)`, where `dists[p]` is the squared
+                euclidean distance of `p`-th point to the closest triangular face
+                in the corresponding example in the batch
+            idxs: LongTensor of shape `(P,)` indicating the closest triangular face
+                in the corresponding example in the batch.
+
+            `dists[p]` is
+            `d(points[p], tris[idxs[p], 0], tris[idxs[p], 1], tris[idxs[p], 2])`
+            where `d(u, v0, v1, v2)` is the distance of point `u` from the triangular
+            face `(v0, v1, v2)`
+
+        """
+        dists, idxs = _C.point_face_dist_forward(
+            points,
+            points_first_idx,
+            tris,
+            tris_first_idx,
+            max_points,
+            min_triangle_area,
+        )
+        ctx.save_for_backward(points, tris, idxs)
+        ctx.min_triangle_area = min_triangle_area
+        return dists, idxs
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_dists):
+        grad_dists = grad_dists.contiguous()
+        points, tris, idxs = ctx.saved_tensors
+        min_triangle_area = ctx.min_triangle_area
+        grad_points, grad_tris = _C.point_face_dist_backward(
+            points, tris, idxs, grad_dists, min_triangle_area
+        )
+        return grad_points, None, grad_tris, None, None, None
+
+
+def _rand_barycentric_coords(
+    size1, size2, dtype: torch.dtype, device: torch.device
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Helper function to generate random barycentric coordinates which are uniformly
+    distributed over a triangle.
+
+    Args:
+        size1, size2: The number of coordinates generated will be size1*size2.
+                      Output tensors will each be of shape (size1, size2).
+        dtype: Datatype to generate.
+        device: A torch.device object on which the outputs will be allocated.
+
+    Returns:
+        w0, w1, w2: Tensors of shape (size1, size2) giving random barycentric
+            coordinates
+    """
+    uv = torch.rand(2, size1, size2, dtype=dtype, device=device)
+    u, v = uv[0], uv[1]
+    u_sqrt = u.sqrt()
+    w0 = 1.0 - u_sqrt
+    w1 = u_sqrt * (1.0 - v)
+    w2 = u_sqrt * v
+    w = torch.cat([w0[..., None], w1[..., None], w2[..., None]], dim=2)
+
+    return w
+
+
+def sample_points_from_meshes(meshes, num_samples: int = 10000):
+    """
+    Convert a batch of meshes to a batch of pointclouds by uniformly sampling
+    points on the surface of the mesh with probability proportional to the
+    face area.
+
+    Args:
+        meshes: A Meshes object with a batch of N meshes.
+        num_samples: Integer giving the number of point samples per mesh.
+        return_normals: If True, return normals for the sampled points.
+        return_textures: If True, return textures for the sampled points.
+
+    Returns:
+        3-element tuple containing
+
+        - **samples**: FloatTensor of shape (N, num_samples, 3) giving the
+          coordinates of sampled points for each mesh in the batch. For empty
+          meshes the corresponding row in the samples array will be filled with 0.
+        - **normals**: FloatTensor of shape (N, num_samples, 3) giving a normal vector
+          to each sampled point. Only returned if return_normals is True.
+          For empty meshes the corresponding row in the normals array will
+          be filled with 0.
+        - **textures**: FloatTensor of shape (N, num_samples, C) giving a C-dimensional
+          texture vector to each sampled point. Only returned if return_textures is True.
+          For empty meshes the corresponding row in the textures array will
+          be filled with 0.
+
+        Note that in a future releases, we will replace the 3-element tuple output
+        with a `Pointclouds` datastructure, as follows
+
+        .. code-block:: python
+
+            Pointclouds(samples, normals=normals, features=textures)
+    """
+    if meshes.isempty():
+        raise ValueError("Meshes are empty.")
+
+    verts = meshes.verts_packed()
+    if not torch.isfinite(verts).all():
+        raise ValueError("Meshes contain nan or inf.")
+
+    faces = meshes.faces_packed()
+    mesh_to_face = meshes.mesh_to_faces_packed_first_idx()
+    num_meshes = len(meshes)
+    num_valid_meshes = torch.sum(meshes.valid)    # Non empty meshes.
+
+    # Initialize samples tensor with fill value 0 for empty meshes.
+    samples = torch.zeros((num_meshes, num_samples, 3), device=meshes.device)
+
+    # Only compute samples for non empty meshes
+    with torch.no_grad():
+        areas, _ = mesh_face_areas_normals(verts, faces)    # Face areas can be zero.
+        max_faces = meshes.num_faces_per_mesh().max().item()
+        areas_padded = packed_to_padded(areas, mesh_to_face[meshes.valid], max_faces)    # (N, F)
+
+        # TODO (gkioxari) Confirm multinomial bug is not present with real data.
+        samples_face_idxs = areas_padded.multinomial(
+            num_samples, replacement=True
+        )    # (N, num_samples)
+        samples_face_idxs += mesh_to_face[meshes.valid].view(num_valid_meshes, 1)
+
+    # Randomly generate barycentric coords.
+    # w                 (N, num_samples, 3)
+    # sample_face_idxs  (N, num_samples)
+    # samples_verts     (N, num_samples, 3, 3)
+
+    samples_bw = _rand_barycentric_coords(num_valid_meshes, num_samples, verts.dtype, verts.device)
+    sample_verts = verts[faces][samples_face_idxs]
+    samples[meshes.valid] = (sample_verts * samples_bw[..., None]).sum(dim=-2)
+
+    return samples, samples_face_idxs, samples_bw
+
+
+def point_mesh_distance(meshes, pcls, weighted=True):
+
+    if len(meshes) != len(pcls):
+        raise ValueError("meshes and pointclouds must be equal sized batches")
+
+    # packed representation for pointclouds
+    points = pcls.points_packed()    # (P, 3)
+    points_first_idx = pcls.cloud_to_packed_first_idx()
+    max_points = pcls.num_points_per_cloud().max().item()
+
+    # packed representation for faces
+    verts_packed = meshes.verts_packed()
+    faces_packed = meshes.faces_packed()
+    tris = verts_packed[faces_packed]    # (T, 3, 3)
+    tris_first_idx = meshes.mesh_to_faces_packed_first_idx()
+
+    # point to face distance: shape (P,)
+    point_to_face, idxs = _PointFaceDistance.apply(
+        points, points_first_idx, tris, tris_first_idx, max_points, 5e-3
+    )
+
+    if weighted:
+        # weight each example by the inverse of number of points in the example
+        point_to_cloud_idx = pcls.packed_to_cloud_idx()    # (sum(P_i),)
+        num_points_per_cloud = pcls.num_points_per_cloud()    # (N,)
+        weights_p = num_points_per_cloud.gather(0, point_to_cloud_idx)
+        weights_p = 1.0 / weights_p.float()
+        point_to_face = torch.sqrt(point_to_face) * weights_p
+
+    return point_to_face, idxs
 
 
 def read_camera_cali(file, ref_img_file, camera_id):
@@ -69,44 +278,163 @@ def read_camera_cali(file, ref_img_file, camera_id):
     return camera_cali
 
 
-scene = pyrender.Scene()
-light = pyrender.SpotLight(
-    color=np.ones(3), intensity=50.0, innerConeAngle=np.pi / 16.0, outerConeAngle=np.pi / 6.0
-)
-
-
-def render(scan_file, ref_img_file, camera_cali):
-
-    # read reference image:
-    ref_img = plt.imread(ref_img_file)
-
-    RENDER_RESOLUTION = [ref_img.shape[1], ref_img.shape[0]]
-    camera = pyrender.camera.IntrinsicsCamera(
-        camera_cali['fx'], camera_cali['fy'], camera_cali['c_x'], camera_cali['c_y']
-    )
-    camera_pose = camera_cali['extrinsic']
-    scene.add(camera, pose=camera_pose)
-    scene.add(light, pose=camera_pose)
-
-    # Add mesh:
-    scan_mesh = trimesh.load(scan_file, process=False)
-    scan_mesh = trimesh.intersections.slice_mesh_plane(scan_mesh, [0, 1, 0], [0, -580.0, 0])
-    scan_mesh.vertices /= 1000.0
-
-    mesh = pyrender.Mesh.from_trimesh(scan_mesh)
-    scene.add(mesh)
-
-    # Render
-    r = pyrender.OffscreenRenderer(RENDER_RESOLUTION[0], RENDER_RESOLUTION[1])
-    color, _ = r.render(scene)
-    mask = (color == color[0, 0]).sum(axis=2, keepdims=True) != 3
-    masked_img = ref_img * mask
-
-    scene.clear()
-
-    return masked_img
-
-
 cameras = {}
 person_id = "00145"
 cam_cali_file = f"/ps/scratch/ps_shared/yxiu/PuzzleIOI/fitting/{person_id}/outfit5/camera.csd"
+
+for i in range(1, 23, 1):
+
+    camera_id = f"{i:02d}_C"
+    ref_img_file = f"/ps/scratch/ps_shared/yxiu/PuzzleIOI/fitting/{person_id}/outfit5/images/{camera_id}.jpg"
+    cameras[camera_id] = read_camera_cali(cam_cali_file, ref_img_file, camera_id)
+
+from torchmetrics.image import PeakSignalNoiseRatio
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from torchmetrics.image import StructuralSimilarityIndexMeasure
+
+
+class Evaluation:
+    def __init__(self, data_root, result_root, device):
+        self.data_root = data_root
+        self.result_root = result_root
+        self.cameras = cameras
+        self.results = {}
+
+        self.scene = pyrender.Scene()
+        self.light = pyrender.SpotLight(
+            color=np.ones(3),
+            intensity=50.0,
+            innerConeAngle=np.pi / 16.0,
+            outerConeAngle=np.pi / 6.0
+        )
+
+        self.scan_file = None
+        self.recon_file = None
+        self.pelvis_file = None
+        self.scan = None
+        self.scan_center = None
+        self.recon = None
+
+        self.ref_img = None
+
+        self.subject = None
+        self.outfit = None
+
+        self.device = device
+
+        # metrics
+        self.psnr = PeakSignalNoiseRatio()
+        self.lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
+        self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
+
+    def load_assets(self, subject, outfit):
+        self.scan_file = os.path.join(self.data_root, subject, outfit, "scan.obj")
+        recon_name = f"{subject}_{outfit}_texture"
+        self.recon_file = os.path.join(self.result_root, subject, outfit, f"obj/{recon_name}.obj")
+        self.pelvis_file = glob(
+            os.path.join(self.data_root.replace("fitting", "puzzle_cam"), subject, outfit) +
+            "/smplx_*.npy"
+        )
+        self.smplx_path = os.path.join(self.data_root, subject, outfit, "smplx/smplx.obj")
+
+        self.pelvis_y = np.load(self.pelvis_file[0], allow_pickle=True).item()["pelvis_y"]
+
+        self.scan = self.load_mesh(self.scan_file, is_scan=True, use_pyrender=True)
+        self.recon = self.load_mesh(self.recon_file, use_pyrender=True)
+
+        self.subject = subject
+        self.outfit = outfit
+
+    def load_mesh(self, mesh_file, is_scan=False, use_pyrender=False):
+
+        mesh = trimesh.load(mesh_file, process=False)
+
+        if is_scan:
+            scan_center = mesh.vertices.mean(axis=0)
+            mesh = trimesh.intersections.slice_mesh_plane(mesh, [0, 1, 0], [0, -580.0, 0])
+            if not use_pyrender:
+                mesh.vertices -= scan_center
+            mesh.vertices /= 1000.0
+        else:
+            mesh.vertices[:, 1] += self.pelvis_y
+            if use_pyrender:
+                mesh.vertices *= 1000.0
+                mesh.vertices += scan_center
+                mesh.vertices /= 1000.0
+                
+        if use_pyrender:
+            mesh = pyrender.Mesh.from_trimesh(mesh)
+        return mesh
+
+    def calculate_visual_similarity(self, cam_id):
+
+        assert isinstance(self.scan, pyrender.Mesh) and isinstance(self.recon, pyrender.Mesh)
+
+        ref_img = plt.imread(
+            os.path.join(self.data_root, self.subject, self.outfit, f"{cam_id}.jpg")
+        )
+        camera_cali = self.cameras[cam_id]
+        r = pyrender.OffscreenRenderer(ref_img.shape[1], ref_img.shape[0])
+        camera = pyrender.camera.IntrinsicsCamera(
+            camera_cali['fx'], camera_cali['fy'], camera_cali['c_x'], camera_cali['c_y']
+        )
+        camera_pose = camera_cali['extrinsic']
+        self.scene.add(camera, pose=camera_pose)
+        self.scene.add(self.light, pose=camera_pose)
+
+        self.scene.add(self.scan, name="scan")
+        scan_color, _ = r.render(self.scene)
+        scan_mask = (scan_color == scan_color[0, 0]).sum(axis=2, keepdims=True) != 3
+        self.scene.remove_node(self.scene.get_node("scan"))
+
+        self.scene.add(self.recon, name="recon")
+        recon_color, _ = r.render(self.scene)
+        self.scene.clear()
+
+        render_dict = {
+            "scan_color": scan_color * scan_mask,
+            "recon_color": recon_color * scan_mask,
+        }
+
+        metrics = self.similarity(render_dict)
+
+        return metrics
+
+    def similarity(self, render_dict):
+        psnr_diff = self.psnr(
+            torch.tensor(render_dict["scan_color"]).permute(2, 0, 1).unsqueeze(0),
+            torch.tensor(render_dict["recon_color"]).permute(2, 0, 1).unsqueeze(0)
+        )
+        ssim_diff = self.ssim(
+            torch.tensor(render_dict["scan_color"]).permute(2, 0, 1).unsqueeze(0),
+            torch.tensor(render_dict["recon_color"]).permute(2, 0, 1).unsqueeze(0)
+        )
+        lpips_diff = self.lpips(
+            torch.tensor(render_dict["scan_color"]).permute(2, 0, 1).unsqueeze(0),
+            torch.tensor(render_dict["recon_color"]).permute(2, 0, 1).unsqueeze(0)
+        )
+
+        return {"psnr": psnr_diff, "ssim": ssim_diff, "lpips": lpips_diff}
+
+    def calculate_p2s(self):
+
+        # reload scan and mesh
+        scan = self.load_mesh(self.scan_file, is_scan=True, use_pyrender=False)
+        recon = self.load_mesh(self.recon_file, use_pyrender=False)
+
+        tgt_mesh = Meshes(
+            verts=[torch.tensor(scan.vertices).float()], faces=[torch.tensor(scan.faces).long()]
+        ).to(self.device)
+        src_mesh = Meshes(
+            verts=[torch.tensor(recon.vertices).float()], faces=[torch.tensor(recon.faces).long()]
+        ).to(self.device)
+
+        tgt_points = Pointclouds(tgt_mesh.verts_packed().unsqueeze(0))
+        p2s_dist1 = point_mesh_distance(src_mesh, tgt_points)[0].sum() * 100.0
+
+        samples_src, _, _ = sample_points_from_meshes(src_mesh, 100000)
+        src_points = Pointclouds(samples_src)
+        p2s_dist2 = point_mesh_distance(tgt_mesh, src_points)[0].sum() * 100.0
+
+        chamfer_dist = 0.5 * (p2s_dist1 + p2s_dist2)
+        return p2s_dist1, chamfer_dist

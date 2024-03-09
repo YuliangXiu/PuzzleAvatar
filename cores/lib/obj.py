@@ -368,7 +368,6 @@ class Mesh():
 
         vc_np = self.v_color.cpu().numpy() if self.v_color is not None else None
         print(f'vertice num: {len(v_np)}, face num: {len(f_np)}')
-        print(f'f_num: {f_np.shape}, ft_num: {ft_np.shape}, fn_num: {fn_np.shape}')
 
         with open(path, "w") as fp:
             fp.write(f'mtllib {os.path.basename(mtl_path)} \n')

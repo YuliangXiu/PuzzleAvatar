@@ -153,7 +153,7 @@ if __name__ == '__main__':
         if use_puzzle:
 
             smpl_param_path = os.path.join(
-                opt.exp_dir.replace("results", "data").replace("puzzle", "fitting"),
+                opt.exp_dir.replace("results", "data").replace("puzzle_cam", "fitting"),
                 "smplx/smplx.pkl"
             )
             print(f"SMPL pkl path: {smpl_param_path}")

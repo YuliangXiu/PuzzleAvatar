@@ -49,14 +49,6 @@
             "group": "Default"
         },
         {
-            "filePath": "logs/human/yuliang/train_multi_concepts.err",
-            "group": "Default"
-        },
-        {
-            "filePath": "logs/human/yuliang/train_geometry.err",
-            "group": "Default"
-        },
-        {
             "filePath": "results/human/yuliang/geometry/validation",
             "group": "Default"
         },
@@ -65,27 +57,7 @@
             "group": "Default"
         },
         {
-            "filePath": "data/PuzzleIOI/puzzle/03594/outfit01",
-            "group": "Default"
-        },
-        {
-            "filePath": "logs/human/yuliang/test_multi_concepts.err",
-            "group": "Default"
-        },
-        {
-            "filePath": "scripts/train_multi_concepts.sh",
-            "group": "Default"
-        },
-        {
             "filePath": "scripts/run.sh",
-            "group": "Default"
-        },
-        {
-            "filePath": "results/PuzzleIOI/puzzle/03594/outfit01/geometry/validation",
-            "group": "Default"
-        },
-        {
-            "filePath": "results/PuzzleIOI/puzzle/03594/outfit01/texture/validation",
             "group": "Default"
         },
         {
@@ -93,7 +65,11 @@
             "group": "Default"
         },
         {
-            "filePath": "logs/human/yuliang/train_texture.err",
+            "filePath": "results/PuzzleIOI/puzzle_cam",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit01",
             "group": "Default"
         }
     ]

@@ -1,4 +1,4 @@
-from diffusers import (ControlNetModel, DDIMScheduler, UNet2DConditionModel, DiffusionPipeline)
+from diffusers import (ControlNetModel, DDIMScheduler, PNDMScheduler, UNet2DConditionModel, DiffusionPipeline)
 from transformers import CLIPTextModel, CLIPTokenizer, logging
 
 # suppress partial model loading warning
@@ -145,7 +145,7 @@ class StableDiffusion(nn.Module):
             self.text_encoder_head = self.text_encoder
             self.unet_head = self.unet
 
-        self.scheduler = DDIMScheduler.from_pretrained(self.base_model_key, subfolder="scheduler")
+        self.scheduler = PNDMScheduler.from_pretrained(self.base_model_key, subfolder="scheduler")
 
         self.num_train_timesteps = self.scheduler.config.num_train_timesteps
         self.min_step = int(self.num_train_timesteps * sd_step_range[0])

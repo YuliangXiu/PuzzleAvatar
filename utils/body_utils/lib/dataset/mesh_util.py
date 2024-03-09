@@ -379,16 +379,13 @@ def mesh_edge_loss(meshes, target_length: float = 0.0):
 
     return loss_all
 
-
-def remesh_laplacian(mesh, face_count=50000):
-
-    mesh = mesh.simplify_quadratic_decimation(face_count)
-    mesh = trimesh.smoothing.filter_humphrey(
-        mesh, alpha=0.1, beta=0.5, iterations=10, laplacian_operator=None
-    )
-    return mesh
-
-
+def mesh_simplify(src_obj):
+    import pymeshlab
+    ms = pymeshlab.MeshSet()
+    ms.load_new_mesh(src_obj)
+    ms.meshing_decimation_quadric_edge_collapse(targetfacenum=500000)
+    ms.save_current_mesh(src_obj)
+    
 def poisson(mesh, obj_path, depth=10):
 
     pcd_path = obj_path[:-4] + "_soups.ply"

@@ -200,7 +200,7 @@ if __name__ == '__main__':
 
     try:
         json_path = f"{opt.out_dir}/gpt4v_response.json"
-        if not os.path.exists(json_path) or opt.overwrite:
+        if not os.path.exists(json_path):
             gpt4v_response = gpt4v_captioning(os.path.join(opt.in_dir, "image"))
             with open(json_path, "w") as f:
                 f.write(gpt4v_response)

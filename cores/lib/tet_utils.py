@@ -28,7 +28,7 @@ def build_tet_grid(mesh, cfg):
         # try:
         ms = pymeshlab.MeshSet()
         ms.add_mesh(pymeshlab.Mesh(mesh.v.cpu().numpy(), mesh.f.cpu().numpy()))
-        ms.generate_resampled_uniform_mesh(offset=pymeshlab.AbsoluteValue(tet_shell_offset))
+        ms.generate_resampled_uniform_mesh(offset=pymeshlab.PureValue(tet_shell_offset))
         ms.save_current_mesh(osp.join(tet_dir, 'dilated_mesh.obj'))
         mesh = pv.read(osp.join(tet_dir, 'dilated_mesh.obj'))
         downsampled_mesh = mesh.decimate(cfg.model.tet_shell_decimate)
