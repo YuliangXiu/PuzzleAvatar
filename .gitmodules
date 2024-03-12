@@ -14,3 +14,7 @@
 	path = thirdparties/peft
 	url = git@github.com:yfeng95/peft.git
 	ignore = dirty
+[submodule "thirdparties/DSINE"]
+	path = thirdparties/DSINE
+	url = git@github.com:baegwangbin/DSINE.git
+	ignore = dirty

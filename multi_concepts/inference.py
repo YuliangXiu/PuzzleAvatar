@@ -21,7 +21,7 @@ import random
 import numpy as np
 
 import torch
-from diffusers import DiffusionPipeline, DDIMScheduler
+from diffusers import DiffusionPipeline
 from diffusers.utils.import_utils import is_xformers_available
 from peft import PeftModel
 
@@ -92,14 +92,6 @@ class BreakASceneInference:
                 requires_safety_checker=False,
             )
 
-            # self.pipeline.scheduler = DDIMScheduler(
-            #     beta_start=0.00085,
-            #     beta_end=0.012,
-            #     beta_schedule="scaled_linear",
-            #     clip_sample=False,
-            #     set_alpha_to_one=False,
-            # )
-
             num_added_tokens = self.pipeline.tokenizer.add_tokens(self.tokens)
             print(f"Added {num_added_tokens} tokens")
             self.pipeline.text_encoder.resize_token_embeddings(len(self.pipeline.tokenizer))
@@ -123,14 +115,6 @@ class BreakASceneInference:
                 torch_dtype=torch.float32,
                 requires_safety_checker=False,
             )
-
-            # self.pipeline.scheduler = DDIMScheduler(
-            #     beta_start=0.00085,
-            #     beta_end=0.012,
-            #     beta_schedule="scaled_linear",
-            #     clip_sample=False,
-            #     set_alpha_to_one=False,
-            # )
 
         num_added_tokens = self.pipeline.tokenizer.add_tokens(self.tokens)
         print(f"Added {num_added_tokens} tokens")

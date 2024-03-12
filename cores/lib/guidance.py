@@ -1,4 +1,6 @@
-from diffusers import (ControlNetModel, DDIMScheduler, PNDMScheduler, UNet2DConditionModel, DiffusionPipeline)
+from diffusers import (
+    ControlNetModel, DDIMScheduler, PNDMScheduler, UNet2DConditionModel, DiffusionPipeline
+)
 from transformers import CLIPTextModel, CLIPTokenizer, logging
 
 # suppress partial model loading warning
@@ -13,6 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 from torch.cuda.amp import custom_bwd, custom_fwd
+from diffusers.utils.import_utils import is_xformers_available
 
 
 class SpecifyGradient(torch.autograd.Function):
@@ -126,6 +129,13 @@ class StableDiffusion(nn.Module):
             print(f"Added {num_added_tokens} tokens")
             self.text_encoder.resize_token_embeddings(len(self.tokenizer))
 
+        if is_xformers_available():
+            self.unet.enable_xformers_memory_efficient_attention()
+
+        self.text_encoder.eval()
+        self.unet.eval()
+        self.vae.eval()
+
         # enable FreeU
         # self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
 
@@ -146,6 +156,13 @@ class StableDiffusion(nn.Module):
             self.unet_head = self.unet
 
         self.scheduler = PNDMScheduler.from_pretrained(self.base_model_key, subfolder="scheduler")
+        # self.scheduler = DDIMScheduler(
+        #     beta_start=0.00085,
+        #     beta_end=0.012,
+        #     beta_schedule="scaled_linear",
+        #     clip_sample=False,
+        #     set_alpha_to_one=False,
+        # )
 
         self.num_train_timesteps = self.scheduler.config.num_train_timesteps
         self.min_step = int(self.num_train_timesteps * sd_step_range[0])
@@ -226,14 +243,14 @@ class StableDiffusion(nn.Module):
 
         # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
 
-        if self.subdiv_step is not None:
-            epoch_num = self.iters // 100
-            subdiv_num = self.subdiv_step[0] // 100
+        # if self.subdiv_step is not None:
+        #     epoch_num = self.iters // 100
+        #     subdiv_num = self.subdiv_step[0] // 100
 
-            if cur_epoch >= subdiv_num:
-                epoch_progress = (cur_epoch - subdiv_num) / (epoch_num - subdiv_num)
-                new_max_step_range = 0.25 + (self.sd_step_range[1] - 0.25) * (1.0 - epoch_progress)
-                self.max_step = int(self.num_train_timesteps * new_max_step_range)
+        #     if cur_epoch >= subdiv_num:
+        #         epoch_progress = (cur_epoch - subdiv_num) / (epoch_num - subdiv_num)
+        #         new_max_step_range = 0.25 + (self.sd_step_range[1] - 0.25) * (1.0 - epoch_progress)
+        #         self.max_step = int(self.num_train_timesteps * new_max_step_range)
 
         t = torch.randint(
             self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device
@@ -294,8 +311,10 @@ class StableDiffusion(nn.Module):
 
         noise_pred_negative, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
 
-        # w(t), sigma_t^2
-        w = (1 - self.alphas[t])
+        # vanilla sds: w(t), sigma_t^2
+        # w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
+        # fantasia3d
+        w = (self.alphas[t]**0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
 
         # original version from DreamFusion (https://dreamfusion3d.github.io/)
         # noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
@@ -305,11 +324,11 @@ class StableDiffusion(nn.Module):
         classifier_pred = guidance_scale * (noise_pred_text - noise_pred_null)
 
         if t < 200:
-            negative_pred = -noise_pred_null
+            negative_pred = noise_pred_null
         else:
-            negative_pred = noise_pred_negative - noise_pred_null
+            negative_pred = noise_pred_null - noise_pred_negative
 
-        noise_pred = classifier_pred - negative_pred
+        noise_pred = classifier_pred + negative_pred
 
         grad = w * noise_pred
 

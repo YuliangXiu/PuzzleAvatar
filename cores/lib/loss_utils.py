@@ -195,3 +195,12 @@ def laplacian_smooth_loss(v_pos, t_pos_idx):
     term = term / torch.clamp(norm, min=1.0)
 
     return torch.mean(term**2)
+
+
+def laplacian_loss(v_pos, t_pos_idx):
+    with torch.no_grad():
+        L = laplacian_uniform(v_pos, t_pos_idx)
+    loss  = L.mm(v_pos)
+    loss = loss.norm(dim=1)
+    loss = loss.mean()
+    return loss

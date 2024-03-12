@@ -25,6 +25,7 @@ import os
 import random
 import sys
 import warnings
+from typing import Union
 from pathlib import Path
 from typing import List, Optional
 
@@ -58,6 +59,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
+from kornia.augmentation import RandomAffine
 
 import wandb
 
@@ -177,6 +179,12 @@ def parse_args():
         type=float,
         default=1.0,
         help="The weight of prior preservation loss.",
+    )
+    parser.add_argument(
+        "--norm_loss_weight",
+        type=float,
+        default=1.0,
+        help="The weight of prior preservation loss on normals.",
     )
     parser.add_argument(
         "--mask_loss_weight",
@@ -626,6 +634,8 @@ class DreamBoothDataset(Dataset):
         self.instance_masks = []
         self.instance_descriptions = []
 
+        self.face_areas = []
+
         for instance_img_path in instance_img_paths:
             instance_idx = instance_img_path.split("/")[-1].split(".")[0]
             instance_mask_paths = glob.glob(f"{instance_data_root}/mask/{instance_idx}_*.png")
@@ -644,12 +654,16 @@ class DreamBoothDataset(Dataset):
                     curr_mask = Image.open(instance_mask_path)
                     curr_mask = self.mask_transforms(curr_mask)[0, None, None, ...]
                     instance_mask.append(curr_mask)
-                    curr_token = instance_mask_path.split(".")[0].split("_")[-1]
+                    curr_cls = instance_mask_path.split(".")[0].split("_")[-1]
+
+                    if curr_cls == 'face':
+                        self.face_areas.append(curr_mask.sum().item() / (self.size * self.size))
+
                     instance_placeholder_token.append(
-                        self.placeholder_full[self.initializer_tokens.index(curr_token)]
+                        self.placeholder_full[self.initializer_tokens.index(curr_cls)]
                     )
-                    instance_class_tokens.append(curr_token)
-                    instance_description.append(self.gpt4v_response[curr_token])
+                    instance_class_tokens.append(curr_cls)
+                    instance_description.append(self.gpt4v_response[curr_cls])
 
                 self.instance_masks.append(torch.cat(instance_mask))
                 self.placeholder_tokens.append(instance_placeholder_token)
@@ -657,10 +671,18 @@ class DreamBoothDataset(Dataset):
                 self.instance_descriptions.append(instance_description)
 
         self.class_images_path = {}
+        self.class_normals_path = {}
         if self.class_data_root is not None and self.with_prior_preservation:
-            class_data_dir = Path(class_data_root) / self.sd_version / self.gender
+            class_rgb_dir = Path(class_data_root) / self.sd_version / self.gender
+            class_normal_dir = Path(class_data_root) / self.sd_version / f"{self.gender}_normal"
+
             self.class_images_path[self.gender] = [
-                item for item in list(class_data_dir.iterdir()) if str(item).endswith(".jpg")
+                item
+                for item in sorted(list(class_rgb_dir.iterdir())) if str(item).endswith(".jpg")
+            ]
+            self.class_normals_path[self.gender] = [
+                item
+                for item in sorted(list(class_normal_dir.iterdir())) if str(item).endswith(".png")
             ]
         else:
             self.class_data_root = None
@@ -672,6 +694,10 @@ class DreamBoothDataset(Dataset):
         return self._length
 
     def construct_prompt(self, classes_to_use, tokens_to_use, descs_to_use):
+
+        replace_for_normal = lambda x: x.replace(
+            "a high-resolution DSLR colored image of ", "a smooth and detailed sculpture of"
+        )
 
         # formulate the prompt and prompt_raw
         prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
@@ -716,7 +742,12 @@ class DreamBoothDataset(Dataset):
                     prompt += f"{tokens_to_use[idx]} {class_token}{ending}"
                     prompt_raw += f"{class_token}{ending}"
 
-        return prompt, prompt_raw
+        prompt_dict = {
+            "prompt": prompt, "prompt_raw": prompt_raw, "prompt_norm": replace_for_normal(prompt),
+            "prompt_raw_norm": replace_for_normal(prompt_raw)
+        }
+
+        return prompt_dict
 
     def tokener(self, prompt, mode='padding'):
 
@@ -743,9 +774,9 @@ class DreamBoothDataset(Dataset):
         num_of_tokens = random.randrange(1, len(self.placeholder_tokens[index % example_len]) + 1)
         sample_prop = np.ones(len(self.class_tokens[index % example_len]))
 
-        for attn_cls in ['face', 'haircut']:
+        for attn_cls in ['face']:
             if attn_cls in self.class_tokens[index % example_len]:
-                sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 1.3
+                sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 2.0
 
         sample_prop /= sample_prop.sum()
 
@@ -767,10 +798,27 @@ class DreamBoothDataset(Dataset):
             self.instance_descriptions[index % example_len][tkn_i] for tkn_i in tokens_ids_to_use
         ]
 
-        prompt, prompt_raw = self.construct_prompt(classes_to_use, tokens_to_use, descs_to_use)
+        prompt_dict = self.construct_prompt(classes_to_use, tokens_to_use, descs_to_use)
 
         example["instance_images"] = self.instance_images[index % example_len]
         example["instance_masks"] = self.instance_masks[index % example_len][tokens_ids_to_use]
+
+        if 'face' in classes_to_use:
+            face_index = classes_to_use.index('face')
+            cur_face_area = example["instance_masks"][face_index].sum() / (self.size * self.size)
+
+            face_random_scale = RandomAffine(
+                degrees=0,
+                scale=(min(self.face_areas) / cur_face_area, 1.0),
+                keepdim=True,
+                same_on_batch=True
+            )
+
+            example["instance_images"], example["instance_masks"] = face_random_scale(
+                torch.cat((example["instance_images"], example["instance_masks"][:, 0]))
+            ).split([3, num_of_tokens], dim=0)
+            example["instance_masks"] = example["instance_masks"][:, None]
+
         example["token_ids"] = torch.tensor([
             self.placeholder_full.index(token) for token in tokens_to_use
         ])
@@ -779,25 +827,28 @@ class DreamBoothDataset(Dataset):
             example["instance_images"] = TF.hflip(example["instance_images"])
             example["instance_masks"] = TF.hflip(example["instance_masks"])
 
-        example["instance_prompt_ids"] = self.tokener(prompt)
-        example["instance_prompt_ids_raw"] = self.tokener(prompt_raw)
+        example["instance_prompt_ids"] = self.tokener(prompt_dict["prompt"])
+        example["instance_prompt_ids_raw"] = self.tokener(prompt_dict["prompt_raw"])
+        example["instance_prompt_ids_raw_norm"] = self.tokener(prompt_dict["prompt_raw_norm"])
         example["class_ids"] = self.tokener(" ".join(classes_to_use), "non_padding")
 
         if self.class_data_root and self.with_prior_preservation:
 
             cls_img_path = self.class_images_path[self.gender][index % self.num_class_images]
+            cls_norm_path = self.class_normals_path[self.gender][index % self.num_class_images]
 
             # for full human
             person_image = Image.open(cls_img_path)
+            person_normal = Image.open(cls_norm_path)
             if not person_image.mode == "RGB":
                 person_image = person_image.convert("RGB")
+            if not person_normal.mode == "RGB":
+                person_normal = person_normal.convert("RGB")
             example["person_images"] = self.image_transforms(person_image)
+            example["person_normals"] = self.mask_transforms(person_normal)
             example["person_filename"] = self.tokener(os.path.basename(str(cls_img_path)))
 
         return example
-
-
-from typing import Union
 
 
 def padded_stack(
@@ -838,6 +889,7 @@ def padded_stack(
 def collate_fn(examples, with_prior_preservation=False):
     input_ids = [example["instance_prompt_ids"] for example in examples]
     raw_input_ids = [example["instance_prompt_ids_raw"] for example in examples]
+    raw_norm_ids = [example["instance_prompt_ids_raw_norm"] for example in examples]
 
     pixel_values = [example["instance_images"] for example in examples]
 
@@ -849,8 +901,9 @@ def collate_fn(examples, with_prior_preservation=False):
 
     if with_prior_preservation:
         person_pixel_values = [example["person_images"] for example in examples]
-        input_ids = raw_input_ids + input_ids
-        pixel_values = person_pixel_values + pixel_values
+        person_norm_values = [example["person_normals"] for example in examples]
+        input_ids = raw_input_ids + raw_norm_ids + input_ids
+        pixel_values = person_pixel_values + person_norm_values + pixel_values
         batch["person_filenames"] = torch.cat([example["person_filename"] for example in examples],
                                               dim=0)
 
@@ -1075,14 +1128,6 @@ class SpatialDreambooth:
             token_embeds[-self.args.num_of_assets:] = token_embeds[-3 * self.args.num_of_assets:-2 *
                                                                    self.args.num_of_assets]
 
-        # Set validation scheduler for logging
-        # self.validation_scheduler = DDIMScheduler(
-        #     beta_start=0.00085,
-        #     beta_end=0.012,
-        #     beta_schedule="scaled_linear",
-        #     clip_sample=False,
-        #     set_alpha_to_one=False,
-        # )
         self.validation_scheduler = PNDMScheduler.from_pretrained(
             self.args.pretrained_model_name_or_path, subfolder="scheduler"
         )
@@ -1286,10 +1331,13 @@ class SpatialDreambooth:
             sd_version=self.args.pretrained_model_name_or_path.split("/")[-1],
         )
 
-        self.args.instance_prompt, self.args.instance_prompt_raw = train_dataset.construct_prompt(
+        prompt_dict = train_dataset.construct_prompt(
             self.args.initializer_tokens, self.placeholder_tokens,
             [self.gpt4v_response[cls_name] for cls_name in self.args.initializer_tokens]
         )
+
+        self.args.instance_prompt = prompt_dict["prompt"]
+        self.args.instance_prompt_raw = prompt_dict["prompt_raw"]
 
         logger.info(f"Placeholder Tokens: {self.placeholder_tokens}")
         logger.info(f"Initializer Tokens: {self.args.initializer_tokens}")
@@ -1586,13 +1634,15 @@ class SpatialDreambooth:
                         )
 
                     loss = 0.
+                    
+                    chunk_num = 3
 
                     if self.args.with_prior_preservation:
                         # Chunk the noise and model_pred into two parts
                         # compute the loss on each part separately.
 
-                        prior_pred, model_pred = torch.chunk(model_pred, 2, dim=0)
-                        prior_target, target = torch.chunk(target, 2, dim=0)
+                        prior_pred, prior_norm_pred, model_pred = torch.chunk(model_pred, chunk_num, dim=0)
+                        prior_target, prior_norm_target, target = torch.chunk(target, chunk_num, dim=0)
 
                     if self.args.apply_masked_loss:
                         max_masks = torch.max(batch["instance_masks"], dim=1).values
@@ -1625,14 +1675,14 @@ class SpatialDreambooth:
                             )
 
                             if self.args.with_prior_preservation:
-                                curr_cond_batch_idx = self.args.train_batch_size + batch_idx
+                                curr_cond_batch_idx = self.args.train_batch_size * (chunk_num-1) + batch_idx
 
                                 agg_attn_prior = self.aggregate_attention(
                                     res=self.attn_res,
                                     from_where=("up", "down"),
                                     is_cross=True,
                                     select=batch_idx,
-                                    batch_size=self.args.train_batch_size * 2,
+                                    batch_size=self.args.train_batch_size * chunk_num,
                                     use_half=False,
                                 )
 
@@ -1644,7 +1694,7 @@ class SpatialDreambooth:
                                 from_where=("up", "down"),
                                 is_cross=True,
                                 select=curr_cond_batch_idx,
-                                batch_size=self.args.train_batch_size * 2,
+                                batch_size=self.args.train_batch_size * chunk_num,
                                 use_half=False,
                             )
 
@@ -1727,6 +1777,9 @@ class SpatialDreambooth:
                                 prior_pred = prior_pred * cls_mask_gt
                                 prior_target = prior_target * cls_mask_gt
 
+                                prior_norm_pred = prior_norm_pred * cls_mask_gt
+                                prior_norm_target = prior_norm_target * cls_mask_gt
+
                                 mask_loss = F.mse_loss(
                                     cls_mask.float(),
                                     cls_mask_gt.float(),
@@ -1736,11 +1789,19 @@ class SpatialDreambooth:
                                 loss += mask_loss
                                 logs["l_mask"] = mask_loss.detach().item()
 
-                            prior_loss = F.mse_loss(
+                            prior_rgb_loss = F.mse_loss(
                                 prior_pred.float(),
                                 prior_target.float(),
                                 reduction="mean",
                             ) * self.args.prior_loss_weight / self.args.train_batch_size
+
+                            prior_norm_rgb_loss = F.mse_loss(
+                                prior_norm_pred.float(),
+                                prior_norm_target.float(),
+                                reduction="mean",
+                            ) * self.args.norm_loss_weight / self.args.train_batch_size
+
+                            prior_loss = prior_rgb_loss + prior_norm_rgb_loss
 
                             loss += prior_loss
                             logs["l_prior"] = prior_loss.detach().item()

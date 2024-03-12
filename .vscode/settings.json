@@ -71,6 +71,31 @@
         {
             "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit01",
             "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit01/texture/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit01/geometry/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/human/yuliang/train_multi_concepts.err",
+            "group": "Default"
+        },
+        {
+            "filePath": "scripts/train_multi_concepts.sh",
+            "group": "Default"
+        },
+        {
+            "filePath": "logs/human/yuliang/train_geometry.err",
+            "group": "Default"
+        },
+        {
+            "filePath": "scripts/train_geometry.sh",
+            "group": "Default"
         }
-    ]
+    ],
+    "favorites.sortOrder": "DESC"
 }

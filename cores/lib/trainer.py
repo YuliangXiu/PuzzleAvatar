@@ -61,6 +61,7 @@ class Trainer(object):
         report_metric_at_train=False,    # also report metrics at training
         use_checkpoint="latest",    # which ckpt to use at init time
         pretrained=None,
+        subdiv_steps=[5000],
         use_tensorboardX=True,    # whether to use tensorboard for logging
         scheduler_update_every_step=False,    # whether to call scheduler.step() after every train step
     ):
@@ -82,6 +83,7 @@ class Trainer(object):
         self.eval_interval = eval_interval
         self.use_checkpoint = use_checkpoint
         self.use_tensorboardX = use_tensorboardX
+        self.subdiv_steps = subdiv_steps
         self.time_stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
         self.scheduler_update_every_step = scheduler_update_every_step
         self.device = device if device is not None else torch.device(
@@ -556,8 +558,8 @@ class Trainer(object):
             lap_loss = 0
             eikonal_loss = 0
 
-            if self.cfg.train.lambda_lap > 0:
-                lap_loss = laplacian_smooth_loss(mesh.v, mesh.f.long())
+            if self.cfg.train.lambda_lap > 0 and self.global_step >= self.subdiv_steps[0]:
+                lap_loss = laplacian_loss(mesh.v, mesh.f.long())
                 loss += self.cfg.train.lambda_lap * lap_loss
                 loss_dict['lap_loss'] = f"{lap_loss.item() * self.cfg.train.lambda_lap:.5f}"
             if self.cfg.train.lambda_eik > 0:
@@ -1004,6 +1006,15 @@ class Trainer(object):
         with torch.no_grad():
             self.local_step = 0
 
+            save_geo_lst = []
+            save_tex_lst = []
+
+            save_path_geo = os.path.join(self.workspace, 'validation', f'{name}_geo.png')
+            save_path_tex = os.path.join(self.workspace, 'validation', f'{name}_tex.png')
+
+            os.makedirs(os.path.dirname(save_path_geo), exist_ok=True)
+            os.makedirs(os.path.dirname(save_path_tex), exist_ok=True)
+
             for data in loader:
                 self.local_step += 1
 
@@ -1040,17 +1051,6 @@ class Trainer(object):
                 # only rank = 0 will perform evaluation.
                 if self.local_rank == 0:
 
-                    # save image
-                    save_path_tex = os.path.join(
-                        self.workspace, 'validation', f'{name}_{self.local_step:04d}_tex.png'
-                    )
-                    save_path_geo = os.path.join(
-                        self.workspace, 'validation', f'{name}_{self.local_step:04d}_geo.png'
-                    )
-
-                    #self.log(f"==> Saving validation image to {save_path}")
-                    os.makedirs(os.path.dirname(save_path_geo), exist_ok=True)
-
                     pred = preds[0].detach().cpu().numpy()
                     pred = (pred * 255).astype(np.uint8)
 
@@ -1063,27 +1063,19 @@ class Trainer(object):
                     pred_normal = (pred_normal * 255).astype(np.uint8)
 
                     if self.stage == "geometry":
-                        cv2.imwrite(
-                            save_path_geo,
-                            np.concatenate([
-                                cv2.cvtColor(pred_normal, cv2.COLOR_RGB2BGR),
-                                np.repeat(pred_depth[..., None], 3, axis=-1)
-                            ], 1)
-                        )
+                        save_geo_lst.append(cv2.cvtColor(pred_normal, cv2.COLOR_RGB2BGR))
                     elif self.stage == "texture":
-                        cv2.imwrite(
-                            save_path_tex,
-                            np.concatenate([
-                                cv2.cvtColor(pred, cv2.COLOR_RGB2BGR),
-                                cv2.cvtColor(pred_normal, cv2.COLOR_RGB2BGR),
-                                np.repeat(pred_depth[..., None], 3, axis=-1)
-                            ], 1)
-                        )
+                        save_tex_lst.append(cv2.cvtColor(pred, cv2.COLOR_RGB2BGR))
                     else:
                         print(f"Unknown stage {self.stage}")
 
                     pbar.set_description(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f})")
                     pbar.update(loader.batch_size)
+
+            if self.stage == "geometry":
+                cv2.imwrite(save_path_geo, np.concatenate(save_geo_lst, 1))
+            if self.stage == "texture":
+                cv2.imwrite(save_path_tex, np.concatenate(save_tex_lst, 1))
 
         average_loss = total_loss / self.local_step
         self.stats["valid_loss"].append(average_loss)

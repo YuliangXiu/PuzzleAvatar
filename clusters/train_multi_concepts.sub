@@ -1,14 +1,14 @@
 executable = ./scripts/train_multi_concepts.sh
-arguments = $(dir)
+arguments = data/$(dir) results/$(dir) $(subject)_$(outfit)
 
 error = ./logs/$(subject)/$(outfit)/train_multi_concepts.err
 output = ./logs/$(subject)/$(outfit)/train_multi_concepts.out
 log = ./logs/$(subject)/$(outfit)/train_multi_concepts.log
 
 request_memory = 20000
-request_disk = 10G
-request_cpus = 8
+request_disk = 5G
+request_cpus = 20
 request_gpus = 1
-requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDAGlobalMemoryMb > 35000)
+requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDAGlobalMemoryMb > 35000 && CUDADeviceName == "NVIDIA H100")
 
-queue dir,subject,outfit from ./clusters/yuliang.txt
+queue dir,subject,outfit from ./clusters/subjects.txt

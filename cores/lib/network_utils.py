@@ -247,7 +247,9 @@ class HashDecoder(nn.Module):
         return sdf_grad.unsqueeze(1)
 
     def numerical_gradient(self, points):
-        eps = 0.01
+
+        # points [-1,1]
+        eps = 1e-3
         offsets = torch.as_tensor([
             [eps, 0.0, 0.0],
             [-eps, 0.0, 0.0],
@@ -261,6 +263,7 @@ class HashDecoder(nn.Module):
             points_offset = self.embed_fn(points_offset)
         sdf_offset = self.net(points_offset)
         sdf_grad = (0.5 * (sdf_offset[..., 0::2, 0] - sdf_offset[..., 1::2, 0]) / eps)
+
         return sdf_grad
 
     def forward(self, p):
@@ -275,10 +278,10 @@ class HashDecoder(nn.Module):
             points_hashcode = points
 
         sdf = self.net(points_hashcode)
-        
+
         if self.use_eikonal:
             sdf_grad = self.numerical_gradient(points)
         else:
             sdf_grad = torch.tensor(0.0).to(sdf)
-            
+
         return [sdf, sdf_grad]

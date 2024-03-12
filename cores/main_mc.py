@@ -15,8 +15,9 @@ from utils.body_utils.lib import smplx
 from utils.body_utils.lib.dataset.mesh_util import SMPLX
 
 torch.set_float32_matmul_precision('high')
-torch._dynamo.config.verbose=False
+torch._dynamo.config.verbose = False
 logging.getLogger("torch._dynamo").setLevel(logging.CRITICAL)
+
 
 def load_config(path, default_path=None):
     cfg = CN(new_allowed=True)
@@ -281,7 +282,8 @@ if __name__ == '__main__':
             use_checkpoint=cfg.train.ckpt,
             eval_interval=cfg.train.eval_interval,
             scheduler_update_every_step=True,
-            pretrained=cfg.train.pretrained
+            pretrained=cfg.train.pretrained,
+            subdiv_steps=cfg.train.tet_subdiv_steps,
         )
 
         valid_loader = ViewDataset(

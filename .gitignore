@@ -23,5 +23,6 @@ thirdparties/GroundingDINO/
 thirdparties/MODNet/
 thirdparties/nvdiffrast/
 thirdparties/peft/
+thirdparties/DSINE/
 examples/multi_concepts/*
 !requirements.txt

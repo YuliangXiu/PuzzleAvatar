@@ -57,9 +57,8 @@ def compact_tets(pos_nx3, sdf_n, tet_fx4):
         occ_n = sdf_n > 0
         occ_fx4 = occ_n[tet_fx4.reshape(-1)].reshape(-1, 4)
         occ_sum = torch.sum(occ_fx4, -1)
-        valid_tets = (occ_sum
-                      > 0) & (occ_sum < 4)    # one value per tet, these are the surface tets
-
+        valid_tets = (occ_sum > 0) & (occ_sum < 4)    # one value per tet, these are the surface tets
+        
         valid_vtx = tet_fx4[valid_tets].reshape(-1)
         unique_vtx, idx_map = torch.unique(valid_vtx, dim=0, return_inverse=True)
         new_pos = pos_nx3[unique_vtx]
@@ -143,7 +142,7 @@ class DMTetMesh(nn.Module):
         self.tet_ind = indices.to(device)
         self.use_explicit = use_explicit
         self.use_eikonal = use_eikonal
-        
+
         if self.use_explicit:
             self.sdf = nn.Parameter(torch.zeros_like(self.tet_v[:, 0]), requires_grad=True)
             self.deform = nn.Parameter(torch.zeros_like(self.tet_v), requires_grad=True)
@@ -202,13 +201,13 @@ class DMTetMesh(nn.Module):
 
     def init_mesh(self, mesh_v, mesh_f, init_padding=0.):
         num_pts = self.tet_v.shape[0]
-        
+
         if torch.is_tensor(mesh_v):
             mesh_v = mesh_v.cpu().numpy()
         if torch.is_tensor(mesh_f):
             mesh_f = mesh_f.cpu().numpy()
         mesh = trimesh.Trimesh(mesh_v, mesh_f)
-        
+
         sdf_tet = torch.tensor(
             mesh_to_sdf.mesh_to_sdf(mesh,
                                     self.tet_v.cpu().numpy()), dtype=torch.float32
@@ -220,7 +219,7 @@ class DMTetMesh(nn.Module):
         if self.use_explicit:
             self.sdf.data[...] = sdf_tet[...]
         else:
-            
+
             optimizer = torch.optim.Adam(list(self.parameters()), lr=1e-3)
             batch_size = 300000
             iter = 1000
@@ -234,7 +233,7 @@ class DMTetMesh(nn.Module):
             points = torch.cat([points, self.tet_v], dim=0)
             sdf_gt = torch.cat([sdf_gt, sdf_tet], dim=0)
             num_pts = len(points)
-            
+
             for i in tqdm(range(iter)):
                 sampled_ind = random.sample(range(num_pts), min(batch_size, num_pts))
                 p = points[sampled_ind]
@@ -245,18 +244,19 @@ class DMTetMesh(nn.Module):
                     sdf, sdf_gt[sampled_ind]
                 )    # + (deform ** 2).mean()
 
-                if self.use_eikonal:
-                    eikonal_loss = (sdf_grad.norm(dim=-1) - 1).abs().mean()
-                    loss = recon_loss + eikonal_loss * 0.0
-                else:
-                    loss = recon_loss
+                # if self.use_eikonal:
+                eikonal_loss = (sdf_grad.norm(dim=-1) - 1.).abs().mean()
+                loss = recon_loss + eikonal_loss * 0.001
+                # else:
+                #     loss = recon_loss
 
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                
+
             with torch.no_grad():
                 mesh_v, mesh_f, _ = self.get_mesh()
+
             pred_mesh = trimesh.Trimesh(mesh_v.cpu().numpy(), mesh_f.cpu().numpy())
 
             print(

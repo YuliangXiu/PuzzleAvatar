@@ -1,12 +1,13 @@
 #!/bin/bash
 source ./scripts/env.sh
 
-export peft_type="lora"
+export peft_type="none"
 
 rm -rf results/$1/geometry/checkpoints
 rm -rf results/$1/geometry/run
 rm -rf results/$1/geometry/validation
 rm -rf results/$1/geometry/visualize
+# rm -rf results/$1/geometry/tet
 
 python cores/main_mc.py \
  --config configs/tech_mc_geometry.yaml \
