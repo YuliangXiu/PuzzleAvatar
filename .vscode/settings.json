@@ -53,10 +53,6 @@
             "group": "Default"
         },
         {
-            "filePath": "results/human/yuliang/texture/validation",
-            "group": "Default"
-        },
-        {
             "filePath": "scripts/run.sh",
             "group": "Default"
         },
@@ -70,10 +66,6 @@
         },
         {
             "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit01",
-            "group": "Default"
-        },
-        {
-            "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit01/texture/validation",
             "group": "Default"
         },
         {
@@ -94,6 +86,10 @@
         },
         {
             "filePath": "scripts/train_geometry.sh",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit12/geometry/validation",
             "group": "Default"
         }
     ],

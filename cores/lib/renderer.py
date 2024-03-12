@@ -635,6 +635,7 @@ class Renderer(nn.Module):
 
         mask, _ = dr.interpolate(torch.ones_like(v[:, :1]).unsqueeze(0), rast, f)    # [1, H, W, 1]
         alpha = mask.clone()
+        
         if alpha_only:
             alpha = dr.antialias(alpha, rast, v_clip, mesh.f).squeeze(0).clamp(0, 1)    # [H, W, 3]
             if self.cfg.model.render_ssaa > 1:

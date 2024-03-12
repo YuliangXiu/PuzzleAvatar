@@ -155,14 +155,14 @@ class StableDiffusion(nn.Module):
             self.text_encoder_head = self.text_encoder
             self.unet_head = self.unet
 
-        self.scheduler = PNDMScheduler.from_pretrained(self.base_model_key, subfolder="scheduler")
-        # self.scheduler = DDIMScheduler(
-        #     beta_start=0.00085,
-        #     beta_end=0.012,
-        #     beta_schedule="scaled_linear",
-        #     clip_sample=False,
-        #     set_alpha_to_one=False,
-        # )
+        # self.scheduler = PNDMScheduler.from_pretrained(self.base_model_key, subfolder="scheduler")
+        self.scheduler = DDIMScheduler(
+            beta_start=0.00085,
+            beta_end=0.012,
+            beta_schedule="scaled_linear",
+            clip_sample=False,
+            set_alpha_to_one=False,
+        )
 
         self.num_train_timesteps = self.scheduler.config.num_train_timesteps
         self.min_step = int(self.num_train_timesteps * sd_step_range[0])
@@ -257,16 +257,12 @@ class StableDiffusion(nn.Module):
         )
 
         # encode image into latents with vae, requires grad!
-        pred_lst = []
 
-        for idx in range(len(pred_rgb)):
+        pred_img = F.interpolate(
+            pred_rgb, (self.res, self.res), mode='bilinear', align_corners=True
+        )
 
-            pred_img = F.interpolate(
-                pred_rgb[idx], (self.res, self.res), mode='bilinear', align_corners=False
-            )
-            pred_lst.append(pred_img)
-
-        latents = self.encode_imgs(torch.mean(torch.stack(pred_lst, dim=0), dim=0))
+        latents = self.encode_imgs(pred_img)
 
         # predict the noise residual with unet, NO grad!
         with torch.no_grad():
@@ -309,12 +305,12 @@ class StableDiffusion(nn.Module):
                 -1, 1, 1, 1
             ) + noise_pred * torch.cat([alpha_t] * 3, dim=0).view(-1, 1, 1, 1)
 
-        noise_pred_negative, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
+        noise_pred_neg, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
 
         # vanilla sds: w(t), sigma_t^2
-        # w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
+        w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
         # fantasia3d
-        w = (self.alphas[t]**0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
+        # w = (self.alphas[t]**0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
 
         # original version from DreamFusion (https://dreamfusion3d.github.io/)
         # noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
@@ -323,17 +319,13 @@ class StableDiffusion(nn.Module):
 
         classifier_pred = guidance_scale * (noise_pred_text - noise_pred_null)
 
-        if t < 200:
-            negative_pred = noise_pred_null
-        else:
-            negative_pred = noise_pred_null - noise_pred_negative
+        mask = (t < 200).int().view(-1, 1, 1, 1)
+        negative_pred = mask * noise_pred_null + (1 - mask) * (noise_pred_null - noise_pred_neg)
 
-        noise_pred = classifier_pred + negative_pred
-
-        grad = w * noise_pred
+        grad = w * (classifier_pred + negative_pred)
 
         grad_norm = torch.norm(grad, dim=-1, keepdim=True) + 1e-8
-        grad = grad_norm.clamp(max=1.0) * grad / grad_norm
+        grad = grad_norm.clamp(max=0.1) * grad / grad_norm
 
         # since we omitted an item in grad, we need to use the custom function to specify the gradient
         loss = SpecifyGradient.apply(latents, grad)

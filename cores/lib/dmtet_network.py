@@ -246,9 +246,9 @@ class DMTetMesh(nn.Module):
 
                 # if self.use_eikonal:
                 eikonal_loss = (sdf_grad.norm(dim=-1) - 1.).abs().mean()
-                loss = recon_loss + eikonal_loss * 0.001
+                loss = recon_loss + eikonal_loss * 0.000
                 # else:
-                #     loss = recon_loss
+                # loss = recon_loss
 
                 optimizer.zero_grad()
                 loss.backward()

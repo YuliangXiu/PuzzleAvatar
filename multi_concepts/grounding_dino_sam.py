@@ -37,7 +37,7 @@ def enhance_class_name(class_names: List[str]) -> List[str]:
 # Function to encode the image
 def encode_image(image_path):
     buffer = io.BytesIO()
-    img = Image.open(image_path).resize((600, 800))
+    img = Image.open(image_path).resize((512, 512)).convert('RGB')
     img.save(buffer, format="JPEG")
     return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
@@ -112,10 +112,12 @@ def gpt4v_captioning(img_dir):
 
     if "PuzzleIOI" in img_dir:
         used_lst = [f"{idx}.jpg" for idx in np.random.randint(101, 120, 3)]
+    elif "thuman2" in img_dir:
+        used_lst = ["000.png", "180.png"]
     else:
         used_lst = random.sample(os.listdir(img_dir), 3)
     images = [encode_image(os.path.join(img_dir, img_name)) for img_name in used_lst]
-    prompt = open("./multi_concepts/gpt4v_prompt.txt", "r").read()
+    prompt = open("./multi_concepts/gpt4v_dimitris.txt", "r").read()
 
     payload = {
         "model": "gpt-4-vision-preview", "messages":

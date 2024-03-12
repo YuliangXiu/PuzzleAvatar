@@ -494,8 +494,6 @@ class Trainer(object):
         pred_rgb = outputs['image'].reshape(1, H, W, 3).permute(0, 3, 1, 2).contiguous()
         pred_depth = outputs['depth'].reshape(1, H, W)
 
-        pred_norm = None
-
         if step_mesh is None:
             step_mesh = outputs['mesh']
 
@@ -531,16 +529,12 @@ class Trainer(object):
             text_z = self.text_z
             text_z_novd = self.text_z
 
-        if pred_norm is not None:
-            pred_lst = [pred_rgb, pred_norm]
-        else:
-            pred_lst = [pred_rgb]
 
         guidance_loss = self.guidance.train_step(
             text_z,
-            pred_lst,
+            pred_rgb,
             guidance_scale=self.cfg.guidance.guidance_scale,
-            controlnet_hint=pred_norm if (self.cfg.stage == 'texture') and
+            controlnet_hint=pred_rgb if (self.cfg.stage == 'texture') and
             (self.cfg.guidance.controlnet != None) else None,
             poses=data['poses'],
             text_embedding_novd=text_z_novd,

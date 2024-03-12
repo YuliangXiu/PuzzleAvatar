@@ -193,6 +193,12 @@ def parse_args():
         help="The weight of prior preservation loss.",
     )
     parser.add_argument(
+        "--syn_loss_weight",
+        type=float,
+        default=1.0,
+        help="The weight of synthetic prior preservation loss.",
+    )
+    parser.add_argument(
         "--num_class_images",
         type=int,
         default=100,
@@ -672,6 +678,10 @@ class DreamBoothDataset(Dataset):
 
         self.class_images_path = {}
         self.class_normals_path = {}
+        self.syn_images_path = {}
+        self.syn_normals_path = {}
+        self.syn_json_path = {}
+
         if self.class_data_root is not None and self.with_prior_preservation:
             class_rgb_dir = Path(class_data_root) / self.sd_version / self.gender
             class_normal_dir = Path(class_data_root) / self.sd_version / f"{self.gender}_normal"
@@ -684,10 +694,27 @@ class DreamBoothDataset(Dataset):
                 item
                 for item in sorted(list(class_normal_dir.iterdir())) if str(item).endswith(".png")
             ]
+
+            syn_rgb_dir = Path(class_data_root) / "thuman2" / self.gender
+            syn_normal_dir = Path(class_data_root) / "thuman2" / f"{self.gender}_norm"
+            syn_json_dir = Path(class_data_root) / "thuman2" / f"{self.gender}_desc"
+
+            self.syn_images_path[self.gender] = [
+                item for item in sorted(list(syn_rgb_dir.iterdir())) if str(item).endswith(".png")
+            ]
+            self.syn_normals_path[self.gender] = [
+                item
+                for item in sorted(list(syn_normal_dir.iterdir())) if str(item).endswith(".png")
+            ]
+            self.syn_json_path[self.gender] = [
+                item
+                for item in sorted(list(syn_json_dir.iterdir())) if str(item).endswith(".json")
+            ]
         else:
             self.class_data_root = None
 
-        self._length = max(len(self.instance_images), self.num_class_images)
+        self.num_syn_images = len(self.syn_images_path[self.gender])
+        self._length = max(len(self.instance_images), self.num_class_images, self.num_syn_images)
 
     def __len__(self):
 
@@ -696,7 +723,7 @@ class DreamBoothDataset(Dataset):
     def construct_prompt(self, classes_to_use, tokens_to_use, descs_to_use):
 
         replace_for_normal = lambda x: x.replace(
-            "a high-resolution DSLR colored image of ", "a smooth and detailed sculpture of"
+            "a high-resolution DSLR colored image of ", "a detailed sculpture of"
         )
 
         # formulate the prompt and prompt_raw
@@ -837,15 +864,48 @@ class DreamBoothDataset(Dataset):
             cls_img_path = self.class_images_path[self.gender][index % self.num_class_images]
             cls_norm_path = self.class_normals_path[self.gender][index % self.num_class_images]
 
+            syn_img_path = self.syn_images_path[self.gender][index % self.num_syn_images]
+            syn_norm_path = self.syn_normals_path[self.gender][index % self.num_syn_images]
+            syn_json_path = self.syn_json_path[self.gender][index % self.num_syn_images]
+
+            # prompt for synthetic data
+            with open(syn_json_path, 'r') as f:
+                gpt4v_syn = json.load(f)
+
+            syn_classes = list(gpt4v_syn.keys())
+            syn_classes.remove("gender")
+            syn_descs = [gpt4v_syn[cls] for cls in syn_classes]
+            syn_tokens = ["" for cls in syn_classes]
+
+            example["syn_prompt_ids_raw"] = self.tokener(
+                self.construct_prompt(syn_classes, syn_tokens, syn_descs)["prompt_raw"]
+            )
+            example["syn_prompt_ids_raw_norm"] = self.tokener(
+                self.construct_prompt(syn_classes, syn_tokens, syn_descs)["prompt_raw_norm"]
+            )
+
             # for full human
             person_image = Image.open(cls_img_path)
             person_normal = Image.open(cls_norm_path)
+            syn_image = Image.open(syn_img_path)
+            syn_normal = Image.open(syn_norm_path)
+            syn_mask = syn_normal.split()[-1]
+
             if not person_image.mode == "RGB":
                 person_image = person_image.convert("RGB")
             if not person_normal.mode == "RGB":
                 person_normal = person_normal.convert("RGB")
+            if not syn_image.mode == "RGB":
+                syn_image = syn_image.convert("RGB")
+            if not syn_normal.mode == "RGB":
+                syn_normal = syn_normal.convert("RGB")
+
             example["person_images"] = self.image_transforms(person_image)
-            example["person_normals"] = self.mask_transforms(person_normal)
+            example["person_normals"] = self.image_transforms(person_normal)
+            example["syn_images"] = self.image_transforms(syn_image)
+            example["syn_normals"] = self.image_transforms(syn_normal)
+            example["syn_mask"] = self.mask_transforms(syn_mask)
+
             example["person_filename"] = self.tokener(os.path.basename(str(cls_img_path)))
 
         return example
@@ -891,6 +951,9 @@ def collate_fn(examples, with_prior_preservation=False):
     raw_input_ids = [example["instance_prompt_ids_raw"] for example in examples]
     raw_norm_ids = [example["instance_prompt_ids_raw_norm"] for example in examples]
 
+    syn_norm_ids = [example["syn_prompt_ids_raw_norm"] for example in examples]
+    syn_rgb_ids = [example["syn_prompt_ids_raw"] for example in examples]
+
     pixel_values = [example["instance_images"] for example in examples]
 
     masks = [example["instance_masks"] for example in examples]
@@ -902,10 +965,16 @@ def collate_fn(examples, with_prior_preservation=False):
     if with_prior_preservation:
         person_pixel_values = [example["person_images"] for example in examples]
         person_norm_values = [example["person_normals"] for example in examples]
-        input_ids = raw_input_ids + raw_norm_ids + input_ids
-        pixel_values = person_pixel_values + person_norm_values + pixel_values
+        syn_pixel_values = [example["syn_images"] for example in examples]
+        syn_norm_values = [example["syn_normals"] for example in examples]
+        syn_mask_values = [example["syn_mask"] for example in examples]
+
+        input_ids = raw_input_ids + raw_norm_ids + syn_rgb_ids + syn_norm_ids + input_ids
+        pixel_values = person_pixel_values + person_norm_values + syn_pixel_values + syn_norm_values + pixel_values
+
         batch["person_filenames"] = torch.cat([example["person_filename"] for example in examples],
                                               dim=0)
+        batch["syn_mask"] = torch.stack(syn_mask_values)
 
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
@@ -1634,15 +1703,23 @@ class SpatialDreambooth:
                         )
 
                     loss = 0.
-                    
-                    chunk_num = 3
+
+                    chunk_num = 5
 
                     if self.args.with_prior_preservation:
                         # Chunk the noise and model_pred into two parts
                         # compute the loss on each part separately.
 
-                        prior_pred, prior_norm_pred, model_pred = torch.chunk(model_pred, chunk_num, dim=0)
-                        prior_target, prior_norm_target, target = torch.chunk(target, chunk_num, dim=0)
+                        prior_pred, prior_norm_pred, syn_pred, syn_norm_pred, model_pred = torch.chunk(
+                            model_pred, chunk_num, dim=0
+                        )
+                        prior_target, prior_norm_target, syn_target, syn_norm_target, target = torch.chunk(
+                            target, chunk_num, dim=0
+                        )
+
+                        downsampled_syn_mask = F.interpolate(
+                            input=batch["syn_mask"], size=(self.mask_res, self.mask_res)
+                        )
 
                     if self.args.apply_masked_loss:
                         max_masks = torch.max(batch["instance_masks"], dim=1).values
@@ -1675,7 +1752,9 @@ class SpatialDreambooth:
                             )
 
                             if self.args.with_prior_preservation:
-                                curr_cond_batch_idx = self.args.train_batch_size * (chunk_num-1) + batch_idx
+                                curr_cond_batch_idx = self.args.train_batch_size * (
+                                    chunk_num - 1
+                                ) + batch_idx
 
                                 agg_attn_prior = self.aggregate_attention(
                                     res=self.attn_res,
@@ -1769,6 +1848,22 @@ class SpatialDreambooth:
                             cls_mask = F.interpolate(
                                 torch.stack(cls_masks), size=(self.mask_res, self.mask_res)
                             )
+
+                            syn_rgb_loss = F.mse_loss(
+                                syn_pred.float() * downsampled_syn_mask.float(),
+                                syn_target.float() * downsampled_syn_mask.float(),
+                                reduction="mean",
+                            ) * self.args.syn_loss_weight / self.args.train_batch_size
+
+                            syn_norm_rgb_loss = F.mse_loss(
+                                syn_norm_pred.float() * downsampled_syn_mask.float(),
+                                syn_norm_target.float() * downsampled_syn_mask.float(),
+                                reduction="mean",
+                            ) * self.args.syn_loss_weight / self.args.train_batch_size
+
+                            loss += syn_rgb_loss + syn_norm_rgb_loss
+                            logs["l_syn"] = syn_rgb_loss.detach().item() + syn_norm_rgb_loss.detach(
+                            ).item()
 
                             if self.args.apply_masked_prior:
                                 cls_mask_gt = F.interpolate(
