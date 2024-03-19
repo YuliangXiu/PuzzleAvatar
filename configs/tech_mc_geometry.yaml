@@ -5,14 +5,14 @@ model:
     tet_offset_scale: 0.
     tet_grid_volume: 5e-8
     tet_num_subdiv: 1
-    render_ssaa: 2
+    render_ssaa: 4
     geo_hash_max_res: 1024
 train:
     lr: 0.001
     h: 512
     w: 512
-    iters: 8000
-    tet_subdiv_steps: [3000]
+    iters: 10000
+    tet_subdiv_steps: [5000]
     use_lap_loss: True
     normal_sample_ratio: 1.0
     radius_range: [0.2, 1.0]

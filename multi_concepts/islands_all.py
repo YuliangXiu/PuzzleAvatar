@@ -25,7 +25,7 @@ if __name__ == "__main__":
     image_dir = f"{opt.out_dir}/image"
     mask_dir = f"{opt.out_dir}/mask"
 
-    with open(os.path.join(f"{opt.out_dir}", 'gpt4v_response.json'), 'r') as f:
+    with open(os.path.join(f"{opt.out_dir}", 'gpt4v_complex.json'), 'r') as f:
         gpt4v_response = json.load(f)
 
     classes = list(gpt4v_response.keys())
@@ -38,7 +38,7 @@ if __name__ == "__main__":
         if len(mask_paths) > 0:
             masks = [cv2.imread(mask_path) for mask_path in mask_paths]
             images = [
-                cv2.imread("_".join(mask_path.replace("mask", "image").split("_")[:1]) + ".jpg")
+                cv2.imread("_".join(mask_path.replace("mask", "image").split("_")[:-1]) + ".jpg")
                 for mask_path in mask_paths
             ]
 
@@ -58,13 +58,13 @@ if __name__ == "__main__":
 
             max_h = max([item[1] for item in sizes])
             max_w = max([item[0] for item in sizes])
-            
+
             positions = rpack.pack(
                 sizes,
                 max_height=int(np.sqrt(len(mask_paths)) + 2) * max_h,
                 max_width=int(np.sqrt(len(mask_paths)) + 2) * max_w
             )
-            
+
             carvas_w = max([p[0] + sizes[idx][0] for idx, p in enumerate(positions)])
             carvas_h = max([p[1] + sizes[idx][1] for idx, p in enumerate(positions)])
             positions = [(p[0], carvas_h - p[1] - sizes[idx][1]) for idx, p in enumerate(positions)]
@@ -73,7 +73,7 @@ if __name__ == "__main__":
             for idx, mask in enumerate(masks):
                 carvas_img[positions[idx][1]:positions[idx][1]+sizes[idx][1],
                         positions[idx][0]:positions[idx][0]+sizes[idx][0]] = \
-                            (images[idx]* (mask[:,:,0:1]>0))[corners[idx][1]:corners[idx][1]+sizes[idx][1],
+                            (images[idx]* ((mask[:,:,0:1]>0)).astype(np.float32))[corners[idx][1]:corners[idx][1]+sizes[idx][1],
                                     corners[idx][0]:corners[idx][0]+sizes[idx][0]]
 
             output_path = f"{output_dir}/{cls}.png"

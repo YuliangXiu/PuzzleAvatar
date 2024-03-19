@@ -536,7 +536,7 @@ def parse_args():
     if args.train_text_encoder:
         args.mixed_precision = "no"
 
-    with open(os.path.join(args.instance_data_dir, 'gpt4v_response.json'), 'r') as f:
+    with open(os.path.join(args.instance_data_dir, 'gpt4v_complex.json'), 'r') as f:
         gpt4v_response = json.load(f)
     args.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
     gpt4v_classes = list(gpt4v_response.keys())

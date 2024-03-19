@@ -5,7 +5,7 @@ import numpy as np
 
 data_root = "./data/PuzzleIOI/puzzle_cam"
 error_file = "./clusters/error.txt"
-error_lst = np.loadtxt(error_file, dtype=str)
+# error_lst = np.loadtxt(error_file, dtype=str)
 
 # with open("./clusters/error.txt", "a") as e:
 #     with open("./clusters/subjects_all.txt", "r") as f:

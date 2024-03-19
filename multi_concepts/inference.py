@@ -42,7 +42,7 @@ class BreakASceneInference:
 
     def _load_meta_data(self):
 
-        with open(os.path.join(self.args.instance_dir, 'gpt4v_response.json'), 'r') as f:
+        with open(os.path.join(self.args.instance_dir, 'gpt4v_complex.json'), 'r') as f:
             gpt4v_response = json.load(f)
             self.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
 

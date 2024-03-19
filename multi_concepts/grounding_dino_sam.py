@@ -3,6 +3,7 @@ import os
 import sys
 import random
 from PIL import Image
+from glob import glob
 
 import torch
 
@@ -37,7 +38,7 @@ def enhance_class_name(class_names: List[str]) -> List[str]:
 # Function to encode the image
 def encode_image(image_path):
     buffer = io.BytesIO()
-    img = Image.open(image_path).resize((512, 512)).convert('RGB')
+    img = Image.open(image_path).resize((600, 800)).convert('RGB')
     img.save(buffer, format="JPEG")
     return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
@@ -111,7 +112,9 @@ def gpt4v_captioning(img_dir):
     }
 
     if "PuzzleIOI" in img_dir:
-        used_lst = [f"{idx}.jpg" for idx in np.random.randint(101, 120, 3)]
+        used_lst = np.random.choice(glob(f"{img_dir}/*_raw.jpg"), 3)
+        used_lst = [os.path.basename(img) for img in used_lst]
+        # used_lst = [f"{idx}.jpg" for idx in np.random.randint(101, 120, 3)]
     elif "thuman2" in img_dir:
         used_lst = ["000.png", "180.png"]
     else:
@@ -168,6 +171,8 @@ if __name__ == '__main__':
     parser.add_argument('--out_dir', type=str, required=True, help="output mask folder")
     parser.add_argument('--overwrite', action="store_true")
     opt = parser.parse_args()
+    
+    gpt_filename = "gpt4v_complex.json"
 
     if not os.path.exists(f"{opt.out_dir}/mask"):
         os.makedirs(f"{opt.out_dir}/mask", exist_ok=True)
@@ -201,7 +206,8 @@ if __name__ == '__main__':
     TEXT_TRESHOLD = 0.40
 
     try:
-        json_path = f"{opt.out_dir}/gpt4v_response.json"
+        json_path = f"{opt.out_dir}/{gpt_filename}"
+        
         if not os.path.exists(json_path):
             gpt4v_response = gpt4v_captioning(os.path.join(opt.in_dir, "image"))
             with open(json_path, "w") as f:
@@ -221,8 +227,8 @@ if __name__ == '__main__':
         print(e)
         with open("./clusters/error.txt", "a") as f:
             f.write(f"{opt.in_dir[5:]} {' '.join(opt.in_dir.split('/')[-2:])}\n")
-        if os.path.exists(f"{opt.in_dir}/gpt4v_response.json"):
-            os.remove(f"{opt.in_dir}/gpt4v_response.json")
+        if os.path.exists(f"{opt.in_dir}/{gpt_filename}"):
+            os.remove(f"{opt.in_dir}/{gpt_filename}")
         sys.exit()
 
     for img_name in tqdm(os.listdir(opt.in_dir + "/image")):
@@ -232,73 +238,74 @@ if __name__ == '__main__':
             img_path = os.path.join(opt.in_dir, "image", img_name)
 
             image = cv2.imread(img_path)
-            if image.shape[:2] != (4096, 4096):
-                image = resizeAndPad(image, (4096, 4096))
-                cv2.imwrite(img_path, image)
+            if image is not None:
+                if image.shape[:2] != (4096, 4096):
+                    image = resizeAndPad(image, (4096, 4096))
+                    cv2.imwrite(img_path, image)
 
-            # detect objects
-            detections = grounding_dino_model.predict_with_classes(
-                image=image,
-                classes=enhance_class_name(class_names=CLASSES),
-                box_threshold=BOX_TRESHOLD,
-                text_threshold=TEXT_TRESHOLD
-            )
+                # detect objects
+                detections = grounding_dino_model.predict_with_classes(
+                    image=image,
+                    classes=enhance_class_name(class_names=CLASSES),
+                    box_threshold=BOX_TRESHOLD,
+                    text_threshold=TEXT_TRESHOLD
+                )
 
-            # convert detections to masks
-            detections.mask = segment(
-                sam_predictor=sam_predictor,
-                image=cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
-                xyxy=detections.xyxy
-            )
+                # convert detections to masks
+                detections.mask = segment(
+                    sam_predictor=sam_predictor,
+                    image=cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
+                    xyxy=detections.xyxy
+                )
 
-            mask_dict = {}
+                mask_dict = {}
 
-            print(img_name, detections.class_id, CLASSES)
+                print(img_name, detections.class_id, CLASSES)
 
-            # if there is person in the image
-            if 0 in detections.class_id:
-                person_masks = detections.mask[detections.class_id == 0]
-                person_mask = (np.stack(person_masks).sum(axis=0) > 0).astype(np.uint8)
+                # if there is person in the image
+                if 0 in detections.class_id:
+                    person_masks = detections.mask[detections.class_id == 0]
+                    person_mask = (np.stack(person_masks).sum(axis=0) > 0).astype(np.uint8)
 
-                for mask, cls_id in zip(detections.mask, detections.class_id):
-                    if cls_id is not None and cls_id != 0:
-                        if np.logical_and(mask, person_mask).sum() / person_mask.sum() < 0.9:
-                            mask_dict[cls_id] = mask_dict.get(cls_id, []) + [mask]
+                    for mask, cls_id in zip(detections.mask, detections.class_id):
+                        if cls_id is not None and cls_id != 0:
+                            if np.logical_and(mask, person_mask).sum() / person_mask.sum() < 0.9:
+                                mask_dict[cls_id] = mask_dict.get(cls_id, []) + [mask]
 
-                mask_final = {}
+                    mask_final = {}
 
-                # stack all the masks of the same class together within the same image
-                for cls_id, masks in mask_dict.items():
-                    mask = np.stack(masks).sum(axis=0) > 0
-                    mask_final[cls_id] = mask
-
-                # remove the overlapping area
-                for cls_id, mask in mask_final.items():
-
-                    if "face" in CLASSES and cls_id == CLASSES.index("face"):
-
-                        mask = face_asset_combine(
-                            mask,
-                            mask_final,
-                            CLASSES,
-                            np.ones((3, 3)),
-                            ["eyeglasses", "glasses"],
-                            ["haircut", "hair"],
-                        )
-
+                    # stack all the masks of the same class together within the same image
+                    for cls_id, masks in mask_dict.items():
+                        mask = np.stack(masks).sum(axis=0) > 0
                         mask_final[cls_id] = mask
 
-                    else:
-                        mask_other = np.zeros_like(mask)
-                        other_cls_ids = list(mask_final.keys())
-                        other_cls_ids.remove(cls_id)
-                        for other_cls_id in other_cls_ids:
-                            mask_other += mask_final[other_cls_id]
-                        mask_final[cls_id] = mask * (mask_other == 0)
+                    # remove the overlapping area
+                    for cls_id, mask in mask_final.items():
 
-                    if (mask_final[cls_id]).sum() > 500:
-                        if CLASSES[cls_id] not in ["eyeglasses", "glasses"]:
-                            cv2.imwrite(
-                                f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
-                                mask_final[cls_id].astype(np.uint8) * 255
+                        if "face" in CLASSES and cls_id == CLASSES.index("face"):
+
+                            mask = face_asset_combine(
+                                mask,
+                                mask_final,
+                                CLASSES,
+                                np.ones((3, 3)),
+                                ["eyeglasses", "glasses"],
+                                ["haircut", "hair"],
                             )
+
+                            mask_final[cls_id] = mask
+
+                        else:
+                            mask_other = np.zeros_like(mask)
+                            other_cls_ids = list(mask_final.keys())
+                            other_cls_ids.remove(cls_id)
+                            for other_cls_id in other_cls_ids:
+                                mask_other += mask_final[other_cls_id]
+                            mask_final[cls_id] = mask * (mask_other == 0)
+
+                        if (mask_final[cls_id]).sum() > 500:
+                            if CLASSES[cls_id] not in ["eyeglasses", "glasses"]:
+                                cv2.imwrite(
+                                    f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
+                                    mask_final[cls_id].astype(np.uint8) * 255
+                                )
