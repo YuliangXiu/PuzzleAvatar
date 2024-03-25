@@ -25,7 +25,7 @@ if __name__ == "__main__":
     image_dir = f"{opt.out_dir}/image"
     mask_dir = f"{opt.out_dir}/mask"
 
-    with open(os.path.join(f"{opt.out_dir}", 'gpt4v_complex.json'), 'r') as f:
+    with open(os.path.join(f"{opt.out_dir}", 'gpt4v_simple.json'), 'r') as f:
         gpt4v_response = json.load(f)
 
     classes = list(gpt4v_response.keys())

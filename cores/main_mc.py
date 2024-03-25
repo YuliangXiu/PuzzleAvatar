@@ -113,7 +113,7 @@ if __name__ == '__main__':
 
     if cfg.guidance.text is None:
         with open(
-            os.path.join(opt.exp_dir.replace("results", "data"), 'gpt4v_complex.json'), 'r'
+            os.path.join(opt.exp_dir.replace("results", "data"), 'gpt4v_simple.json'), 'r'
         ) as f:
             gpt4v_response = json.load(f)
             gender, cfg.guidance.text, cfg.guidance.text_head, placeholders = dict_to_prompt(

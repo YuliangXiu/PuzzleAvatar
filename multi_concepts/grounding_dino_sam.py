@@ -112,7 +112,7 @@ def gpt4v_captioning(img_dir):
     }
 
     if "PuzzleIOI" in img_dir:
-        used_lst = np.random.choice(glob(f"{img_dir}/*_raw.jpg"), 3)
+        used_lst = np.random.choice(glob(f"{img_dir}/*_raw.jpg"), 2)
         used_lst = [os.path.basename(img) for img in used_lst]
         # used_lst = [f"{idx}.jpg" for idx in np.random.randint(101, 120, 3)]
     elif "thuman2" in img_dir:
@@ -120,17 +120,18 @@ def gpt4v_captioning(img_dir):
     else:
         used_lst = random.sample(os.listdir(img_dir), 3)
     images = [encode_image(os.path.join(img_dir, img_name)) for img_name in used_lst]
-    prompt = open("./multi_concepts/gpt4v_dimitris.txt", "r").read()
+    # prompt = open("./multi_concepts/gpt4v_complex.txt", "r").read()
+    prompt = open("./multi_concepts/gpt4v_simple.txt", "r").read()
 
     payload = {
         "model": "gpt-4-vision-preview", "messages":
         [{"role": "user", "content": [
             {"type": "text", "text": prompt},
-        ]}], "max_tokens": 300
+        ]}], "max_tokens": 500
     }
     for image in images:
         payload["messages"][0]["content"].append({
-            "type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}
+            "type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}", "detail": "low"}
         })
 
     response = requests.post(
@@ -172,7 +173,8 @@ if __name__ == '__main__':
     parser.add_argument('--overwrite', action="store_true")
     opt = parser.parse_args()
     
-    gpt_filename = "gpt4v_complex.json"
+    # gpt_filename = "gpt4v_complex.json"
+    gpt_filename = "gpt4v_simple.json"
 
     if not os.path.exists(f"{opt.out_dir}/mask"):
         os.makedirs(f"{opt.out_dir}/mask", exist_ok=True)
