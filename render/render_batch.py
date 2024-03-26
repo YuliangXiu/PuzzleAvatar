@@ -141,13 +141,13 @@ def render_subject(subject, dataset, save_folder, rotation, size, render_types, 
 
             rndr.display()
 
-            opengl_util.render_result(
-                rndr, 0, os.path.join(save_folder, subject, 'render', f'{mode}_{y:03d}.png')
-            )
+            rgb_path = os.path.join(save_folder, subject, 'render', f'{mode}_{y:03d}.png')
+            norm_path = os.path.join(save_folder, subject, 'normal', f'{mode}_{y:03d}.png')
 
-            opengl_util.render_result(
-                rndr, 1, os.path.join(save_folder, subject, f"normal", f'{mode}_{y:03d}.png')
-            )
+            if not os.path.exists(rgb_path):
+                opengl_util.render_result(rndr, 0, rgb_path)
+            if not os.path.exists(norm_path):
+                opengl_util.render_result(rndr, 1, norm_path)
 
     # grid_save(os.path.join(save_folder, subject, 'normal'))
 

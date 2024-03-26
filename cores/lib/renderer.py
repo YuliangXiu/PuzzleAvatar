@@ -597,7 +597,7 @@ class Renderer(nn.Module):
                 h = min(h, 2048)
                 w = min(w, 2048)
             dirs = rays_d.view(h0, w0, 3)
-            dirs = scale_img_hwc(dirs, (h, w), mag='nearest').view(-1, 3).contiguous()
+            dirs = scale_img_hwc(dirs, (h, w), mag='bilinear').view(-1, 3).contiguous()
         else:
             h, w = h0, w0
             dirs = rays_d

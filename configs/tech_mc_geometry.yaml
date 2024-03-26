@@ -5,7 +5,7 @@ model:
     tet_offset_scale: 0.
     tet_grid_volume: 5e-8
     tet_num_subdiv: 1
-    render_ssaa: 4
+    render_ssaa: 2
     geo_hash_max_res: 1024
 train:
     lr: 0.001
@@ -21,7 +21,7 @@ train:
     phi_diff: 30
     jitter_pose: False
     face_sample_ratio: 0.5
-    face_height_range: [0., 0.]
+    face_height_range: [0., 0.2]
     face_radius_range: [0.3, 0.4]
     face_phi_diff: 30
     face_theta_range: [60, 120]

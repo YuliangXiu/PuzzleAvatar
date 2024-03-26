@@ -8,9 +8,9 @@ export SUBJECT_NAME=$3
 export BASE_MODEL=stabilityai/stable-diffusion-2-1-base
 export peft_type="none"
 
-# # Step 0: Run DINO+SAM
-# python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR} --overwrite
-python multi_concepts/islands_all.py --out_dir ${INPUT_DIR} --overwrite
+# # # Step 0: Run DINO+SAM
+# # python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR} --overwrite
+# python multi_concepts/islands_all.py --out_dir ${INPUT_DIR} --overwrite
 
 # Step 1: Run multi-concept DreamBooth training
 rm -rf ${EXP_DIR}/text_encoder

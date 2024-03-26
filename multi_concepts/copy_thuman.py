@@ -7,10 +7,11 @@ from glob import glob
 from tqdm import tqdm
 from multi_concepts.grounding_dino_sam import gpt4v_captioning
 
-tgt_root = "./data/multi_concepts_data/thuman2"
-src_root = "/home/yxiu/Code/DC-PIFu/data/thuman2_36views"
+tgt_root = "./data/multi_concepts_data/thuman2_orbit"
+src_root = "./data/thuman2_36views"
 
 all_src_rgbs_dirs = sorted(glob(f"{src_root}/*/render"))
+
 pbar = tqdm(all_src_rgbs_dirs)
 
 for src_rgb_dir in pbar:
@@ -36,18 +37,18 @@ for src_rgb_dir in pbar:
         gpt4v_dict = json.loads(gpt4v_response)
 
     gender = 'man' if gpt4v_dict["gender"] == "male" else "woman"
-
-    picked_rgbs = np.random.choice(glob(f"{src_rgb_dir}/*"), 3, replace=False)
+    picked_rgbs = np.random.choice(glob(f"{src_rgb_dir}/*"), 4, replace=False)
 
     for picked_rgb in picked_rgbs:
 
-        picked_norm = picked_rgb.replace("render", "normal_F")
+        picked_norm = picked_rgb.replace("render", "normal")
 
         tgt_rgb = os.path.join(
-            tgt_root, gender, f"{src_rgb_dir.split('/')[-2]}_{picked_rgb.split('/')[-1]}"
+            tgt_root, f"{gender}", f"{src_rgb_dir.split('/')[-2]}_{picked_rgb.split('/')[-1]}"
         )
         tgt_norm = os.path.join(
-            tgt_root, f"{gender}_norm", f"{src_rgb_dir.split('/')[-2]}_{picked_rgb.split('/')[-1]}"
+            tgt_root, f"{gender}_norm",
+            f"{src_rgb_dir.split('/')[-2]}_{picked_rgb.split('/')[-1]}"
         )
         tgt_json = os.path.join(
             tgt_root, f"{gender}_desc",

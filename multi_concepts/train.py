@@ -695,9 +695,10 @@ class DreamBoothDataset(Dataset):
                 for item in sorted(list(class_normal_dir.iterdir())) if str(item).endswith(".png")
             ]
 
-            syn_rgb_dir = Path(class_data_root) / "thuman2" / self.gender
-            syn_normal_dir = Path(class_data_root) / "thuman2" / f"{self.gender}_norm"
-            syn_json_dir = Path(class_data_root) / "thuman2" / f"{self.gender}_desc"
+            syn_dataset = "thuman2_orbit"
+            syn_rgb_dir = Path(class_data_root) / syn_dataset / self.gender
+            syn_normal_dir = Path(class_data_root) / syn_dataset / f"{self.gender}_norm"
+            syn_json_dir = Path(class_data_root) / syn_dataset / f"{self.gender}_desc"
 
             self.syn_images_path[self.gender] = [
                 item for item in sorted(list(syn_rgb_dir.iterdir())) if str(item).endswith(".png")
@@ -720,14 +721,18 @@ class DreamBoothDataset(Dataset):
 
         return self._length
 
-    def construct_prompt(self, classes_to_use, tokens_to_use, descs_to_use):
+    def construct_prompt(self, classes_to_use, tokens_to_use, descs_to_use, is_face=False):
 
         replace_for_normal = lambda x: x.replace(
             "a high-resolution DSLR colored image of ", "a detailed sculpture of"
         )
 
         # formulate the prompt and prompt_raw
-        prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
+        if is_face:
+            prompt_head = f"a high-resolution DSLR colored image of the face of a {self.gender}"
+        else:
+            prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
+
         facial_classes = ['face', 'haircut', 'hair']
         with_classes = [cls for cls in classes_to_use if cls in facial_classes]
         wear_classes = [cls for cls in classes_to_use if cls not in facial_classes]
@@ -877,11 +882,14 @@ class DreamBoothDataset(Dataset):
             syn_descs = [gpt4v_syn[cls] for cls in syn_classes]
             syn_tokens = ["" for cls in syn_classes]
 
+            is_face = True if 'head' in str(syn_json_path) else False
+
             example["syn_prompt_ids_raw"] = self.tokener(
-                self.construct_prompt(syn_classes, syn_tokens, syn_descs)["prompt_raw"]
+                self.construct_prompt(syn_classes, syn_tokens, syn_descs, is_face)["prompt_raw"]
             )
             example["syn_prompt_ids_raw_norm"] = self.tokener(
-                self.construct_prompt(syn_classes, syn_tokens, syn_descs)["prompt_raw_norm"]
+                self.construct_prompt(syn_classes, syn_tokens, syn_descs,
+                                      is_face)["prompt_raw_norm"]
             )
 
             # for full human
