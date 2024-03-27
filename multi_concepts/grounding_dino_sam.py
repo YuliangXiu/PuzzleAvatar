@@ -23,6 +23,39 @@ from tqdm.auto import tqdm
 from scipy import ndimage
 
 
+def get_face(image):
+
+    def bbox2(img):
+        # from https://stackoverflow.com/a/31402351/19249364
+        rows = np.any(img, axis=1)
+        cols = np.any(img, axis=0)
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+        return rmin, rmax, cmin, cmax
+    
+    bbox = bbox2(image[:,:,0])
+    cropped = image[bbox[0]:bbox[1]+1, bbox[2]:bbox[3]+1, :]
+    
+    import mediapipe as mp
+    from mediapipe.tasks import python
+    from mediapipe.tasks.python import vision
+    
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cropped.copy())
+    
+    # STEP 2: Create an FaceDetector object.
+    base_options = python.BaseOptions(model_asset_path="./multi_concepts/blaze_face_short_range.tflite")
+    options = vision.FaceDetectorOptions(base_options=base_options)
+    detector = vision.FaceDetector.create_from_options(options)
+    
+    # STEP 4: Detect faces in the input image.
+    try:
+        face_score = detector.detect(mp_image).detections[0].categories[0].score
+        return face_score > 0.60
+    except:
+        return False
+
+
+
 def enhance_class_name(class_names: List[str]) -> List[str]:
 
     new_class_names = []
@@ -36,9 +69,9 @@ def enhance_class_name(class_names: List[str]) -> List[str]:
 
 
 # Function to encode the image
-def encode_image(image_path):
+def encode_image(image_path, res=(600, 800)):
     buffer = io.BytesIO()
-    img = Image.open(image_path).resize((600, 800)).convert('RGB')
+    img = Image.open(image_path).resize(res).convert('RGB')
     img.save(buffer, format="JPEG")
     return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
@@ -114,14 +147,16 @@ def gpt4v_captioning(img_dir):
     if "PuzzleIOI" in img_dir:
         used_lst = np.random.choice(glob(f"{img_dir}/*_raw.jpg"), 2)
         used_lst = [os.path.basename(img) for img in used_lst]
+        prompt = open("./multi_concepts/gpt4v_simple.txt", "r").read()
+        res = (600, 800)
         # used_lst = [f"{idx}.jpg" for idx in np.random.randint(101, 120, 3)]
     elif "thuman2" in img_dir:
         used_lst = ["000.png", "180.png"]
+        prompt = open("./multi_concepts/gpt4v_complex.txt", "r").read()
+        res = (256, 256)
     else:
         used_lst = random.sample(os.listdir(img_dir), 3)
-    images = [encode_image(os.path.join(img_dir, img_name)) for img_name in used_lst]
-    # prompt = open("./multi_concepts/gpt4v_complex.txt", "r").read()
-    prompt = open("./multi_concepts/gpt4v_simple.txt", "r").read()
+    images = [encode_image(os.path.join(img_dir, img_name), res=res) for img_name in used_lst]
 
     payload = {
         "model": "gpt-4-vision-preview", "messages":
@@ -131,7 +166,8 @@ def gpt4v_captioning(img_dir):
     }
     for image in images:
         payload["messages"][0]["content"].append({
-            "type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}", "detail": "low"}
+            "type": "image_url", "image_url":
+            {"url": f"data:image/jpeg;base64,{image}", "detail": "low"}
         })
 
     response = requests.post(
@@ -172,7 +208,7 @@ if __name__ == '__main__':
     parser.add_argument('--out_dir', type=str, required=True, help="output mask folder")
     parser.add_argument('--overwrite', action="store_true")
     opt = parser.parse_args()
-    
+
     # gpt_filename = "gpt4v_complex.json"
     gpt_filename = "gpt4v_simple.json"
 
@@ -209,7 +245,7 @@ if __name__ == '__main__':
 
     try:
         json_path = f"{opt.out_dir}/{gpt_filename}"
-        
+
         if not os.path.exists(json_path):
             gpt4v_response = gpt4v_captioning(os.path.join(opt.in_dir, "image"))
             with open(json_path, "w") as f:
@@ -217,6 +253,7 @@ if __name__ == '__main__':
         else:
             with open(json_path, "r") as f:
                 gpt4v_response = f.read()
+                
 
         print(gpt4v_response)
 
@@ -307,7 +344,15 @@ if __name__ == '__main__':
 
                         if (mask_final[cls_id]).sum() > 500:
                             if CLASSES[cls_id] not in ["eyeglasses", "glasses"]:
-                                cv2.imwrite(
-                                    f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
-                                    mask_final[cls_id].astype(np.uint8) * 255
-                                )
+                                
+                                keep = True
+                                
+                                if CLASSES[cls_id] == "face":
+                                    face_img = image * mask_final[cls_id][:, :, None]
+                                    keep = get_face(face_img)  
+                                
+                                if keep:
+                                    cv2.imwrite(
+                                        f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
+                                        mask_final[cls_id].astype(np.uint8) * 255
+                                    )

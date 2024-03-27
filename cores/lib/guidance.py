@@ -229,6 +229,7 @@ class StableDiffusion(nn.Module):
         controlnet_conditioning_scale=1.0,
         is_face=False,
         cur_epoch=0,
+        stage="geometry",
         **kwargs
     ):
 
@@ -243,12 +244,12 @@ class StableDiffusion(nn.Module):
 
         # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
 
-        # if self.subdiv_step is not None:
+        # refine_epoch = 50
+        # if stage == "texture" and cur_epoch >= refine_epoch:
         #     epoch_num = self.iters // 100
-        #     subdiv_num = self.subdiv_step[0] // 100
 
-        #     if cur_epoch >= subdiv_num:
-        #         epoch_progress = (cur_epoch - subdiv_num) / (epoch_num - subdiv_num)
+        #     if cur_epoch >= refine_epoch:
+        #         epoch_progress = (cur_epoch - refine_epoch) / (epoch_num - refine_epoch)
         #         new_max_step_range = 0.25 + (self.sd_step_range[1] - 0.25) * (1.0 - epoch_progress)
         #         self.max_step = int(self.num_train_timesteps * new_max_step_range)
 
@@ -257,7 +258,6 @@ class StableDiffusion(nn.Module):
         )
 
         # encode image into latents with vae, requires grad!
-
         pred_img = F.interpolate(
             pred_rgb, (self.res, self.res), mode='bilinear', align_corners=True
         )
@@ -308,9 +308,9 @@ class StableDiffusion(nn.Module):
         noise_pred_neg, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
 
         # vanilla sds: w(t), sigma_t^2
-        w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
+        # w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
         # fantasia3d
-        # w = (self.alphas[t]**0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
+        w = (self.alphas[t]**0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
 
         # original version from DreamFusion (https://dreamfusion3d.github.io/)
         # noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)

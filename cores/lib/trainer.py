@@ -540,6 +540,7 @@ class Trainer(object):
             text_embedding_novd=text_z_novd,
             is_face=is_face,
             cur_epoch=self.epoch,
+            stage=self.stage,
         )
 
         loss += guidance_loss

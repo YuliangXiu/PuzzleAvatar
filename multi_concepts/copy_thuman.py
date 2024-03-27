@@ -9,6 +9,7 @@ from multi_concepts.grounding_dino_sam import gpt4v_captioning
 
 tgt_root = "./data/multi_concepts_data/thuman2_orbit"
 src_root = "./data/thuman2_36views"
+# src_root = "/home/yxiu/Code/ICON/data/thuman2_36views"
 
 all_src_rgbs_dirs = sorted(glob(f"{src_root}/*/render"))
 
@@ -23,6 +24,7 @@ for src_rgb_dir in pbar:
     if not os.path.exists(json_path):
         try:
             gpt4v_response = gpt4v_captioning(src_rgb_dir)
+            print(gpt4v_response)
             with open(json_path, "w") as f:
                 f.write(gpt4v_response)
             gpt4v_dict = json.loads(gpt4v_response)
@@ -35,6 +37,16 @@ for src_rgb_dir in pbar:
         with open(json_path, "r") as f:
             gpt4v_response = f.read()
         gpt4v_dict = json.loads(gpt4v_response)
+        
+        # uppper case to lower case
+        gpt4v_dict_new = {}
+        for key in gpt4v_dict.keys():
+            gpt4v_dict_new[key] = gpt4v_dict[key].lower()
+        if gpt4v_dict_new != gpt4v_dict:
+            with open(json_path, "w") as f:
+                f.write(json.dumps(gpt4v_dict_new))
+            gpt4v_dict = gpt4v_dict_new
+            
 
     gender = 'man' if gpt4v_dict["gender"] == "male" else "woman"
     picked_rgbs = np.random.choice(glob(f"{src_rgb_dir}/*"), 4, replace=False)
