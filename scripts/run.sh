@@ -25,13 +25,13 @@ python multi_concepts/train.py \
   --class_data_dir data/multi_concepts_data \
   --train_batch_size 1  \
   --phase1_train_steps 1000 \
-  --phase2_train_steps 3000 \
+  --phase2_train_steps 4000 \
   --lr_step_rules "1:2000,0.1" \
   --initial_learning_rate 5e-4 \
   --learning_rate 2e-6 \
   --prior_loss_weight 1.0 \
   --norm_loss_weight 0.0 \
-  --syn_loss_weight 5.0 \
+  --syn_loss_weight 1.0 \
   --mask_loss_weight 1.0 \
   --lambda_attention 1e-2 \
   --img_log_steps 1000 \

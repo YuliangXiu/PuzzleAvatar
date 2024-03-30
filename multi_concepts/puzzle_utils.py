@@ -4,6 +4,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 import pyrender
+from torchvision.utils import make_grid
 from glob import glob
 
 import torch
@@ -361,7 +362,7 @@ class Evaluation:
                 mesh.vertices *= 1000.0
                 mesh.vertices += scan_center
                 mesh.vertices /= 1000.0
-                
+
         if use_pyrender:
             mesh = pyrender.Mesh.from_trimesh(mesh)
         return mesh
@@ -438,3 +439,151 @@ class Evaluation:
 
         chamfer_dist = 0.5 * (p2s_dist1 + p2s_dist2)
         return p2s_dist1, chamfer_dist
+
+
+class Evaluation_EASY:
+    def __init__(self, data_root, result_geo_root, result_img_root, device):
+        self.data_root = data_root
+        self.result_geo_root = result_geo_root
+        self.result_img_root = result_img_root
+        self.results = {}
+
+        self.scan_file = None
+        self.recon_file = None
+        self.pelvis_file = None
+        self.smplx_file = None
+
+        self.scan = None
+        self.scan_center = None
+        self.recon = None
+        self.ref_img = None
+        self.pelvis_y = None
+
+        self.subject = None
+        self.outfit = None
+
+        self.device = device
+
+        # metrics
+        self.psnr = PeakSignalNoiseRatio()
+        self.lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
+        self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
+
+    def load_paths(self, subject, outfit):
+
+        # geo path
+        self.scan_file = os.path.join(self.data_root, subject, outfit, "scan.obj")
+        recon_name = f"{subject}_{outfit}_texture"
+        self.recon_file = os.path.join(
+            self.result_geo_root, subject, outfit, f"obj/{recon_name}.obj"
+        )
+        self.pelvis_file = glob(
+            os.path.join(self.data_root.replace("fitting", "puzzle_cam"), subject, outfit) +
+            "/smplx_*.npy"
+        )
+        self.smplx_file = os.path.join(self.data_root, subject, outfit, "smplx/smplx.obj")
+
+        # tex path
+        self.render_gt_dir = os.path.join(self.result_img_root, "fitting", subject, outfit)
+        self.render_recon_dir = os.path.join(self.result_img_root, "puzzle_cam", subject, outfit)
+
+        self.subject = subject
+        self.outfit = outfit
+
+    def load_assets(self):
+
+        # geo data
+        self.pelvis_y = np.load(self.pelvis_file[0], allow_pickle=True).item()["pelvis_y"]
+        self.scan = self.load_mesh(self.scan_file, is_scan=True)
+        self.recon = self.load_mesh(self.recon_file)
+        self.smplx = trimesh.load(self.smplx_file, process=False)
+
+        # tex data
+        self.src_imgs = {}
+        self.tgt_imgs = {}
+        for mode in ["normal", "render"]:
+            self.src_imgs[mode] = [
+                torch.as_tensor(plt.imread(img_file))
+                for img_file in glob(f"{self.render_gt_dir}/{mode}/*.png")
+            ]
+            self.tgt_imgs[mode] = [
+                torch.as_tensor(plt.imread(img_file))
+                for img_file in glob(f"{self.render_recon_dir}/{mode}/*.png")
+            ]
+
+    def load_mesh(self, mesh_file, is_scan=False):
+
+        mesh = trimesh.load(mesh_file, process=False)
+
+        if is_scan:
+            scan_center = mesh.vertices.mean(axis=0)
+            mesh = trimesh.intersections.slice_mesh_plane(mesh, [0, 1, 0], [0, -580.0, 0])
+            mesh.vertices -= scan_center
+            mesh.vertices /= 1000.0
+        else:
+            mesh.vertices[:, 1] += self.pelvis_y
+
+        return mesh
+
+    def calculate_visual_similarity(self):
+
+        tgt_normal_arr = make_grid(torch.cat(self.tgt_imgs["normal"], dim=0), nrow=4)
+        tgt_render_arr = make_grid(torch.cat(self.tgt_imgs["render"], dim=0), nrow=4)
+        src_normal_arr = make_grid(torch.cat(self.src_imgs["normal"], dim=0), nrow=4)
+        src_render_arr = make_grid(torch.cat(self.src_imgs["render"], dim=0), nrow=4)
+
+        mask_arr = tgt_normal_arr[:, :, [-1]] * (tgt_normal_arr[:, :, [2]] > 0.5)
+        # plt.imsave(f"./tmp/{self.subject}_{self.outfit}_mask.jpg", mask_arr[:,:,0])
+
+        metrics = {}
+        metrics["Normal"] = (((((src_normal_arr[..., :3] - tgt_normal_arr[..., :3]) * mask_arr)**
+                               2).sum(dim=2).mean()) * 4.0).item()
+
+        render_dict = {
+            "scan_color": tgt_render_arr[..., :3] * mask_arr,
+            "recon_color": src_render_arr[..., :3] * mask_arr,
+        }
+
+        metrics.update(self.similarity(render_dict))
+
+        return metrics
+
+    def similarity(self, render_dict):
+        psnr_diff = self.psnr(
+            render_dict["scan_color"].permute(2, 0, 1).unsqueeze(0),
+            render_dict["recon_color"].permute(2, 0, 1).unsqueeze(0)
+        )
+        ssim_diff = self.ssim(
+            render_dict["scan_color"].permute(2, 0, 1).unsqueeze(0),
+            render_dict["recon_color"].permute(2, 0, 1).unsqueeze(0)
+        )
+        lpips_diff = self.lpips(
+            render_dict["scan_color"].permute(2, 0, 1).unsqueeze(0),
+            render_dict["recon_color"].permute(2, 0, 1).unsqueeze(0)
+        )
+
+        return {"PSNR": psnr_diff.item(), "SSIM": ssim_diff.item(), "LPIPS": lpips_diff.item()}
+
+    def calculate_p2s(self):
+
+        # reload scan and mesh
+
+        tgt_mesh = Meshes(
+            verts=[torch.tensor(self.scan.vertices).float()],
+            faces=[torch.tensor(self.scan.faces).long()]
+        ).to(self.device)
+        src_mesh = Meshes(
+            verts=[torch.tensor(self.recon.vertices).float()],
+            faces=[torch.tensor(self.recon.faces).long()]
+        ).to(self.device)
+
+        tgt_points = Pointclouds(tgt_mesh.verts_packed().unsqueeze(0))
+        p2s_dist1 = point_mesh_distance(src_mesh, tgt_points)[0].sum() * 100.0
+
+        samples_src, _, _ = sample_points_from_meshes(src_mesh, 100000)
+        src_points = Pointclouds(samples_src)
+        p2s_dist2 = point_mesh_distance(tgt_mesh, src_points)[0].sum() * 100.0
+
+        chamfer_dist = 0.5 * (p2s_dist1 + p2s_dist2)
+
+        return {"P2S": p2s_dist1.item(), "Chamfer": chamfer_dist.item()}
