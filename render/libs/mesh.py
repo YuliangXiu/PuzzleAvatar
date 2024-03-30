@@ -436,8 +436,10 @@ def load_scan(mesh_file, with_normal=False, with_texture=False):
                     face_norm_data.append(f)
 
     vertices = np.array(vertex_data)
-    faces = np.array(face_data) - 1
-
+    try:
+        faces = np.array(face_data) - 1
+    except:
+        print(mesh_file)
     if with_texture and with_normal:
         uvs = np.array(uv_data)
         face_uvs = np.array(face_uv_data) - 1

@@ -91,6 +91,30 @@
         {
             "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit12/geometry/validation",
             "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03539/outfit8/geometry/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03539/outfit17/geometry/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03595/outfit9/geometry/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03595/outfit13/geometry/validation",
+            "group": "Default"
+        },
+        {
+            "filePath": "tmp/PuzzleIOI_4views/puzzle_cam/03539/outfit17/obj/render/000.png",
+            "group": "Default"
+        },
+        {
+            "filePath": "data/PuzzleIOI_4views/fitting/03539/outfit17/render/000.png",
+            "group": "Default"
         }
     ],
     "favorites.sortOrder": "DESC"

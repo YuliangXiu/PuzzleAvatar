@@ -142,7 +142,7 @@ def computePRT(mesh_path, scale, n, order):
         PRT_all = None
         for i in range(n):
             SH = np.repeat(SH_orig[None, (i * n):((i + 1) * n)], n_v,
-                           axis=0).reshape(-1, SH_orig.shape[1])
+                            axis=0).reshape(-1, SH_orig.shape[1])
             vectors = np.repeat(vectors_orig[None, (i * n):((i + 1) * n)], n_v,
                                 axis=0).reshape(-1, 3)
 
@@ -154,7 +154,7 @@ def computePRT(mesh_path, scale, n, order):
             hits = mesh.ray.intersects_any(origins + delta * normals, vectors)
             nohits = np.logical_and(front, np.logical_not(hits))
 
-            PRT = (nohits.astype(np.float) * dots)[:, None] * SH
+            PRT = (nohits.astype(np.float32) * dots)[:, None] * SH
 
             if PRT_all is not None:
                 PRT_all += (PRT.reshape(-1, n, SH.shape[1]).sum(1))

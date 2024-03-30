@@ -226,16 +226,25 @@ if __name__ == "__main__":
         tokens_ids_to_use = sorted(
             random.sample(range(len(break_a_scene_inference.classes)), k=num_of_tokens)
         )
+        full_tokens_ids_to_use = list(range(len(break_a_scene_inference.classes)))
 
         prompt, prompt_raw, classes_to_use = break_a_scene_inference.construct_prompt(
             tokens_ids_to_use
         )
 
-        tokens.append(f"img{i:02d}_" + "_".join(classes_to_use))
-        tokens.append(f"img{i:02d}_" + "_".join(classes_to_use) + "_raw")
+        prompt_full, prompt_raw_full, classes_to_use_full = break_a_scene_inference.construct_prompt(
+            full_tokens_ids_to_use
+        )
+
+        tokens.append(f"asset_{i:02d}_" + "_".join(classes_to_use))
+        tokens.append(f"asset_{i:02d}_" + "_".join(classes_to_use) + "_raw")
+        tokens.append(f"full_{i:02d}_" + "_".join(classes_to_use_full))
+        tokens.append(f"full_{i:02d}_" + "_".join(classes_to_use_full) + "_raw")
 
         prompts.append(prompt)
         prompts.append(prompt_raw)
+        prompts.append(prompt_full)
+        prompts.append(prompt_raw_full)
 
     # print(prompts)
 

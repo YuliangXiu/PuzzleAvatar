@@ -41,7 +41,7 @@ def render_result(rndr, shader_id, path, mask=False):
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if shader_id != 2:
-        cv2.imwrite(path, np.uint8(255.0 * cam_render))
+        cv2.imwrite(path, np.uint8(255.0 * cam_render).clip(0, 255))
     else:
         cam_render[:, :, -1] -= 0.5
         cam_render[:, :, -1] *= 2.0

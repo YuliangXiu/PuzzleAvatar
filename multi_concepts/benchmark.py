@@ -2,11 +2,12 @@ import os
 import torch
 import numpy as np
 from tqdm import tqdm
+from glob import glob
 from multi_concepts.puzzle_utils import Evaluation
 
 data_root = "./data/PuzzleIOI/fitting"
 result_root = "./results/PuzzleIOI/puzzle_cam"
-pbar = tqdm(os.listdir(data_root))
+pbar = tqdm(glob(f"{data_root}/*/outfit*/"))
 
 results = {}
 

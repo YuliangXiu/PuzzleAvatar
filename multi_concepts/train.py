@@ -77,6 +77,7 @@ UNET_TARGET_MODULES = [
     "to_q", "to_v", "to_k", "proj_in", "proj_out", "to_out.0", "add_k_proj", "add_v_proj",
     "ff.net.2"
 ]
+
 TEXT_ENCODER_TARGET_MODULES = [
     "embed_tokens", "q_proj", "k_proj", "v_proj", "out_proj", "mlp.fc1", "mlp.fc2"
 ]
@@ -841,9 +842,10 @@ class DreamBoothDataset(Dataset):
 
             face_random_scale = RandomAffine(
                 degrees=0,
-                scale=(min(self.face_areas) / cur_face_area, 1.0),
+                scale=(1.0, max(self.face_areas) / cur_face_area),
                 keepdim=True,
-                same_on_batch=True
+                same_on_batch=True,
+                p=0.5,
             )
 
             example["instance_images"], example["instance_masks"] = face_random_scale(
