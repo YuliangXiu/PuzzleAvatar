@@ -115,6 +115,50 @@
         {
             "filePath": "data/PuzzleIOI_4views/fitting/03539/outfit17/render/000.png",
             "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03595/outfit13/texture/visualize/texture_ep0100_rgb.mp4",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/human/yuliang/texture/visualize/texture_ep0100_rgb.mp4",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit01/texture/visualize/texture_ep0100_rgb.mp4",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03594/outfit12/texture/visualize/texture_ep0100_rgb.mp4",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03539/outfit8/texture/visualize/texture_ep0100_rgb.mp4",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03539/outfit17/texture/visualize/texture_ep0100_rgb.mp4",
+            "group": "Default"
+        },
+        {
+            "filePath": "results/PuzzleIOI/puzzle_cam/03595/outfit9/texture/visualize/texture_ep0100_rgb.mp4",
+            "group": "Default"
+        },
+        {
+            "filePath": "data/PuzzleIOI/puzzle_cam/03594/outfit12/packed/face.png",
+            "group": "Default"
+        },
+        {
+            "filePath": "data/human/yuliang/packed",
+            "group": "Default"
+        },
+        {
+            "filePath": "data/human/yuliang/packed/face.png",
+            "group": "Default"
+        },
+        {
+            "filePath": "data/PuzzleIOI/puzzle_cam/03595/outfit12/packed/face.png",
+            "group": "Default"
         }
     ],
     "favorites.sortOrder": "DESC"

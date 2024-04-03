@@ -57,6 +57,7 @@ deepspeed
 flash_attn
 openpyxl
 xformers
+face_alignment
 git+https://github.com/openai/CLIP.git@main#egg=clip
 git+https://github.com/marian42/mesh_to_sdf.git
 git+https://github.com/YuliangXiu/taming-transformers.git

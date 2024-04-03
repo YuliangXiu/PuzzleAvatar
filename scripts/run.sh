@@ -9,8 +9,8 @@ export BASE_MODEL=stabilityai/stable-diffusion-2-1-base
 export peft_type="none"
 
 # # # Step 0: Run DINO+SAM
-# python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR} --overwrite
-# python multi_concepts/islands_all.py --out_dir ${INPUT_DIR} --overwrite
+python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR} --overwrite
+python multi_concepts/islands_all.py --out_dir ${INPUT_DIR} --overwrite
 
 # Step 1: Run multi-concept DreamBooth training
 rm -rf ${EXP_DIR}/text_encoder
@@ -31,7 +31,7 @@ python multi_concepts/train.py \
   --learning_rate 2e-6 \
   --prior_loss_weight 1.0 \
   --norm_loss_weight 0.0 \
-  --syn_loss_weight 1.0 \
+  --syn_loss_weight 2.0 \
   --mask_loss_weight 1.0 \
   --lambda_attention 1e-2 \
   --img_log_steps 1000 \

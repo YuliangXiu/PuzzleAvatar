@@ -9,6 +9,9 @@ from glob import glob
 
 import torch
 from typing import Tuple
+from pyrender.primitive import Primitive
+from pyrender.constants import GLTF
+from pyrender.mesh import Mesh
 
 from pytorch3d import _C
 from pytorch3d.ops.mesh_face_areas_normals import mesh_face_areas_normals
@@ -587,3 +590,89 @@ class Evaluation_EASY:
         chamfer_dist = 0.5 * (p2s_dist1 + p2s_dist2)
 
         return {"P2S": p2s_dist1.item(), "Chamfer": chamfer_dist.item()}
+
+
+class PyRenderer:
+    def __init__(self, data_root, device):
+        self.data_root = data_root
+        self.cameras = np.load("./multi_concepts/camera.npy", allow_pickle=True).item()
+        self.results = {}
+
+        self.scene = pyrender.Scene(ambient_light=np.ones(3))
+        self.material = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[1., 1., 1., 1.],
+            metallicFactor=0.0,
+            roughnessFactor=0.0,
+            smooth=True,
+            alphaMode='BLEND'
+        )
+
+        self.scan_file = None
+        self.pelvis_file = None
+
+        self.scan = None
+        self.ref_img = None
+
+        self.subject = None
+        self.outfit = None
+
+        self.device = device
+
+    def load_assets(self, subject, outfit):
+        self.scan_file = os.path.join(self.data_root, subject, outfit, "scan.obj")
+        self.pelvis_file = glob(
+            os.path.join(self.data_root.replace("fitting", "puzzle_cam"), subject, outfit) +
+            "/smplx_*.npy"
+        )
+        self.smplx_path = os.path.join(self.data_root, subject, outfit, "smplx/smplx.obj")
+
+        self.scan = self.load_mesh(self.scan_file)
+        self.smplx = trimesh.load(self.smplx_path, process=False)
+        self.pelvis_y = 0.5 * (self.smplx.vertices[:, 1].min() + self.smplx.vertices[:, 1].max())
+
+        self.subject = subject
+        self.outfit = outfit
+
+    def load_mesh(self, mesh_file):
+
+        mesh = trimesh.load(mesh_file, process=False)
+        mesh = trimesh.intersections.slice_mesh_plane(mesh, [0, 1, 0], [0, -580.0, 0])
+
+        return mesh
+
+    def load_material(self, mesh, camera_mat):
+
+        primitive = Primitive(
+            positions=mesh.vertices / 1000.0,
+            normals=mesh.vertex_normals,
+            texcoord_0=None,
+            color_0=(np.matmul(mesh.vertex_normals,
+                               np.linalg.inv(camera_mat).T) + 1.0) * 0.5,
+            indices=mesh.faces,
+            material=self.material,
+            mode=GLTF.TRIANGLES
+        )
+
+        return Mesh(primitives=[primitive], is_visible=True)
+
+    def render_normal(self, cam_id):
+
+        ref_img = plt.imread(
+            os.path.join(self.data_root, self.subject, self.outfit, "images", f"{cam_id}.jpg")
+        )
+        camera_cali = self.cameras[cam_id]
+        r = pyrender.OffscreenRenderer(ref_img.shape[1], ref_img.shape[0])
+        camera = pyrender.camera.IntrinsicsCamera(
+            camera_cali['fx'], camera_cali['fy'], camera_cali['c_x'], camera_cali['c_y']
+        )
+        camera_pose = camera_cali['extrinsic']
+        self.scene.add(camera, pose=camera_pose)
+
+        tex_scan = self.load_material(self.scan, camera_cali['extrinsic'][:3, :3])
+        self.scene.add(tex_scan, name="scan")
+
+        scan_color, _ = r.render(self.scene, flags=pyrender.constants.RenderFlags.FLAT)
+        self.scene.clear()
+        mask_arr = (scan_color.sum(2)[...,None] != 255 * 3) * (scan_color[:, :, [2]] > 0.5 * 255.0)
+
+        return np.concatenate([scan_color, (mask_arr * 255).astype(np.uint8)], axis=2)

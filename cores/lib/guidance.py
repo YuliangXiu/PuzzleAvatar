@@ -136,9 +136,6 @@ class StableDiffusion(nn.Module):
         self.unet.eval()
         self.vae.eval()
 
-        # enable FreeU
-        # self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
-
         print(f'[INFO] loaded PEFT adapters!')
 
         self.use_head_model = head_hf_key is not None
@@ -233,6 +230,10 @@ class StableDiffusion(nn.Module):
         **kwargs
     ):
 
+        if stage == 'texture':
+            # enable FreeU
+            self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+
         if is_face:
             unet = self.unet_head
         else:
@@ -243,15 +244,6 @@ class StableDiffusion(nn.Module):
         # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
 
         # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
-
-        # refine_epoch = 50
-        # if stage == "texture" and cur_epoch >= refine_epoch:
-        #     epoch_num = self.iters // 100
-
-        #     if cur_epoch >= refine_epoch:
-        #         epoch_progress = (cur_epoch - refine_epoch) / (epoch_num - refine_epoch)
-        #         new_max_step_range = 0.25 + (self.sd_step_range[1] - 0.25) * (1.0 - epoch_progress)
-        #         self.max_step = int(self.num_train_timesteps * new_max_step_range)
 
         t = torch.randint(
             self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device
@@ -308,9 +300,9 @@ class StableDiffusion(nn.Module):
         noise_pred_neg, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
 
         # vanilla sds: w(t), sigma_t^2
-        # w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
+        w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
         # fantasia3d
-        w = (self.alphas[t]**0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
+        # w = (self.alphas[t]**0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
 
         # original version from DreamFusion (https://dreamfusion3d.github.io/)
         # noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)

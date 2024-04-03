@@ -852,6 +852,7 @@ class DreamBoothDataset(Dataset):
                 torch.cat((example["instance_images"], example["instance_masks"][:, 0]))
             ).split([3, num_of_tokens], dim=0)
             example["instance_masks"] = example["instance_masks"][:, None]
+            
 
         example["token_ids"] = torch.tensor([
             self.placeholder_full.index(token) for token in tokens_to_use

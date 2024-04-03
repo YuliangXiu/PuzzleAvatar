@@ -21,39 +21,98 @@ from groundingdino.util.inference import Model
 from segment_anything import SamPredictor, sam_model_registry
 from tqdm.auto import tqdm
 from scipy import ndimage
+import face_alignment
+
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+
+fa = face_alignment.FaceAlignment(
+    face_alignment.LandmarksType.THREE_D, flip_input=False, device='cuda'
+)
+
+end_list = np.array([17, 22, 27, 42, 48, 31, 36, 68], dtype=np.int32) - 1
+
+
+def plot_kpts(image, kpts, color='g'):
+    ''' Draw 68 key points
+    Args: 
+        image: the input image
+        kpt: (68, 3).
+    '''
+    if color == 'r':
+        c = (255, 0, 0)
+    elif color == 'g':
+        c = (0, 255, 0)
+    elif color == 'b':
+        c = (255, 0, 0)
+    image = image.copy()
+    kpts = kpts.copy()
+    radius = max(int(min(image.shape[0], image.shape[1]) / 200), 1)
+    for i in range(kpts.shape[0]):
+        st = kpts[i, :2]
+        if kpts.shape[1] == 4:
+            if kpts[i, 3] > 0.5:
+                c = (0, 255, 0)
+            else:
+                c = (0, 0, 255)
+        image = cv2.circle(image, (int(st[0]), int(st[1])), radius, c, radius * 2)
+        if i in end_list:
+            continue
+        ed = kpts[i + 1, :2]
+        image = cv2.line(
+            image, (int(st[0]), int(st[1])), (int(ed[0]), int(ed[1])), (255, 255, 255), radius
+        )
+    return image
 
 
 def get_face(image):
-
     def bbox2(img):
         # from https://stackoverflow.com/a/31402351/19249364
         rows = np.any(img, axis=1)
         cols = np.any(img, axis=0)
         rmin, rmax = np.where(rows)[0][[0, -1]]
         cmin, cmax = np.where(cols)[0][[0, -1]]
+        r_height = rmax - rmin
+        c_width = cmax - cmin
+        rmin, rmax = max(0, rmin - r_height // 4), min(img.shape[0] - 1, rmax + r_height // 4)
+        cmin, cmax = max(0, cmin - c_width // 4), min(img.shape[1] - 1, cmax + c_width // 4)
         return rmin, rmax, cmin, cmax
-    
-    bbox = bbox2(image[:,:,0])
-    cropped = image[bbox[0]:bbox[1]+1, bbox[2]:bbox[3]+1, :]
-    
-    import mediapipe as mp
-    from mediapipe.tasks import python
-    from mediapipe.tasks.python import vision
-    
+
+    bbox = bbox2(image[:, :, 0])
+    cropped = image[bbox[0]:bbox[1] + 1, bbox[2]:bbox[3] + 1, :]
+    cropped = cv2.resize(cropped, (512, int(cropped.shape[0] / (cropped.shape[1] / 512))))
+    preds = fa.get_landmarks(cropped, return_landmark_score=True)
+
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cropped.copy())
-    
+
     # STEP 2: Create an FaceDetector object.
-    base_options = python.BaseOptions(model_asset_path="./multi_concepts/blaze_face_short_range.tflite")
+    base_options = python.BaseOptions(
+        model_asset_path="./multi_concepts/blaze_face_short_range.tflite"
+    )
     options = vision.FaceDetectorOptions(base_options=base_options)
     detector = vision.FaceDetector.create_from_options(options)
-    
-    # STEP 4: Detect faces in the input image.
+
+    valid_groups = [
+        np.arange(3, 7),
+        np.arange(12, 16),
+        np.arange(18, 23),
+        np.arange(23, 28),
+        np.arange(28, 37),
+        np.arange(37, 43),
+        np.arange(43, 49),
+        np.arange(49, 69)
+    ]
+
     try:
         face_score = detector.detect(mp_image).detections[0].categories[0].score
-        return face_score > 0.60
+        valid_ids = np.where(preds[1][0] > 0.80)[0] + 1
+        if len(np.intersect1d(valid_ids, valid_groups[-1])) > 3 and face_score > 0.6:
+            return True
+        else:
+            return False
     except:
         return False
-
 
 
 def enhance_class_name(class_names: List[str]) -> List[str]:
@@ -188,7 +247,7 @@ def face_asset_combine(mask, mask_final, CLASSES, struct, labels_add, labels_rem
                 structure=struct,
                 iterations=3
             )
-            print(f"add {label} {mask_final.keys()}")
+            # print(f"add {label} {mask_final.keys()}")
     for label in labels_remove:
         if label in CLASSES and CLASSES.index(label) in mask_final.keys():
             mask = ndimage.binary_erosion(
@@ -196,7 +255,7 @@ def face_asset_combine(mask, mask_final, CLASSES, struct, labels_add, labels_rem
                 structure=struct,
                 iterations=3
             )
-            print(f"remove {label} {mask_final.keys()}")
+            # print(f"remove {label} {mask_final.keys()}")
 
     return mask
 
@@ -253,7 +312,6 @@ if __name__ == '__main__':
         else:
             with open(json_path, "r") as f:
                 gpt4v_response = f.read()
-                
 
         print(gpt4v_response)
 
@@ -275,6 +333,7 @@ if __name__ == '__main__':
         if "raw" not in img_name:
 
             img_path = os.path.join(opt.in_dir, "image", img_name)
+            print("image path", img_path)
 
             image = cv2.imread(img_path)
             if image is not None:
@@ -299,7 +358,7 @@ if __name__ == '__main__':
 
                 mask_dict = {}
 
-                print(img_name, detections.class_id, CLASSES)
+                # print(img_name, detections.class_id, CLASSES)
 
                 # if there is person in the image
                 if 0 in detections.class_id:
@@ -344,13 +403,13 @@ if __name__ == '__main__':
 
                         if (mask_final[cls_id]).sum() > 500:
                             if CLASSES[cls_id] not in ["eyeglasses", "glasses"]:
-                                
+
                                 keep = True
-                                
+
                                 if CLASSES[cls_id] == "face":
                                     face_img = image * mask_final[cls_id][:, :, None]
-                                    keep = get_face(face_img)  
-                                
+                                    keep = get_face(face_img)
+
                                 if keep:
                                     cv2.imwrite(
                                         f"{opt.out_dir}/mask/{img_name[:-4]}_{CLASSES[cls_id]}.png",
