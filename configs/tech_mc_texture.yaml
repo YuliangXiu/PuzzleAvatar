@@ -20,7 +20,7 @@ train:
     theta_range: [60, 120]
     phi_diff: 30
     jitter_pose: False
-    face_sample_ratio: 0.5
+    face_sample_ratio: 0.3
     face_height_range: [0., 0.]
     face_radius_range: [0.3, 0.4]
     face_phi_diff: 30

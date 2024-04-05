@@ -129,6 +129,9 @@ class StableDiffusion(nn.Module):
             print(f"Added {num_added_tokens} tokens")
             self.text_encoder.resize_token_embeddings(len(self.tokenizer))
 
+        # enable FreeU
+        self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+
         if is_xformers_available():
             self.unet.enable_xformers_memory_efficient_attention()
 
@@ -230,10 +233,6 @@ class StableDiffusion(nn.Module):
         **kwargs
     ):
 
-        if stage == 'texture':
-            # enable FreeU
-            self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
-
         if is_face:
             unet = self.unet_head
         else:
@@ -244,7 +243,6 @@ class StableDiffusion(nn.Module):
         # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
 
         # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
-
         t = torch.randint(
             self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device
         )
@@ -285,7 +283,6 @@ class StableDiffusion(nn.Module):
                 ).sample
 
         # perform guidance (high scale from paper!)
-
         if self.scheduler.config.prediction_type == "v_prediction":
             alphas_cumprod = self.scheduler.alphas_cumprod.to(
                 device=latents_noisy.device, dtype=latents_noisy.dtype

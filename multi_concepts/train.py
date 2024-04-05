@@ -38,6 +38,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import torchvision.transforms.functional as TF
 import transformers
+from kornia.morphology import dilation
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
@@ -807,9 +808,9 @@ class DreamBoothDataset(Dataset):
         num_of_tokens = random.randrange(1, len(self.placeholder_tokens[index % example_len]) + 1)
         sample_prop = np.ones(len(self.class_tokens[index % example_len]))
 
-        for attn_cls in ['face']:
-            if attn_cls in self.class_tokens[index % example_len]:
-                sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 2.0
+        # for attn_cls in ['face']:
+        #     if attn_cls in self.class_tokens[index % example_len]:
+        #         sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 2.0
 
         sample_prop /= sample_prop.sum()
 
@@ -838,21 +839,31 @@ class DreamBoothDataset(Dataset):
 
         if 'face' in classes_to_use:
             face_index = classes_to_use.index('face')
-            cur_face_area = example["instance_masks"][face_index].sum() / (self.size * self.size)
+            face_mask = example["instance_masks"][face_index]
 
-            face_random_scale = RandomAffine(
-                degrees=0,
-                scale=(1.0, max(self.face_areas) / cur_face_area),
-                keepdim=True,
-                same_on_batch=True,
-                p=0.5,
-            )
+            # cur_face_area = example["instance_masks"][face_index].sum() / (self.size * self.size)
 
-            example["instance_images"], example["instance_masks"] = face_random_scale(
-                torch.cat((example["instance_images"], example["instance_masks"][:, 0]))
-            ).split([3, num_of_tokens], dim=0)
-            example["instance_masks"] = example["instance_masks"][:, None]
-            
+            # face_random_scale = RandomAffine(
+            #     degrees=0,
+            #     scale=(1.0, max(self.face_areas) / cur_face_area),
+            #     keepdim=True,
+            #     same_on_batch=True,
+            #     p=0.5,
+            # )
+
+            # example["instance_images"], example["instance_masks"] = face_random_scale(
+            #     torch.cat((example["instance_images"], example["instance_masks"][:, 0]))
+            # ).split([3, num_of_tokens], dim=0)
+            # example["instance_masks"] = example["instance_masks"][:, None]
+
+            # dilation the face mask
+            bbox = bbox2(face_mask[0].numpy())
+            k_size = max(bbox[1] - bbox[0], bbox[3] - bbox[2]) // 4
+            example["instance_masks"][face_index] = dilation(
+                face_mask.unsqueeze(0),
+                kernel=torch.ones(k_size, k_size),
+                border_value=1.0,
+            ).squeeze(0)
 
         example["token_ids"] = torch.tensor([
             self.placeholder_full.index(token) for token in tokens_to_use
@@ -920,6 +931,20 @@ class DreamBoothDataset(Dataset):
             example["person_filename"] = self.tokener(os.path.basename(str(cls_img_path)))
 
         return example
+
+
+def bbox2(img):
+
+    # from https://stackoverflow.com/a/31402351/19249364
+    rows = np.any(img, axis=1)
+    cols = np.any(img, axis=0)
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
+    r_height = rmax - rmin
+    c_width = cmax - cmin
+    rmin, rmax = max(0, rmin - r_height // 4), min(img.shape[0] - 1, rmax + r_height // 4)
+    cmin, cmax = max(0, cmin - c_width // 4), min(img.shape[1] - 1, cmax + c_width // 4)
+    return rmin, rmax, cmin, cmax
 
 
 def padded_stack(

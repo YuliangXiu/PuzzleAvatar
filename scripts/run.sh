@@ -9,8 +9,8 @@ export BASE_MODEL=stabilityai/stable-diffusion-2-1-base
 export peft_type="none"
 
 # # # Step 0: Run DINO+SAM
-python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR} --overwrite
-python multi_concepts/islands_all.py --out_dir ${INPUT_DIR} --overwrite
+# python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR} --overwrite
+# python multi_concepts/islands_all.py --out_dir ${INPUT_DIR} --overwrite
 
 # Step 1: Run multi-concept DreamBooth training
 rm -rf ${EXP_DIR}/text_encoder
@@ -44,7 +44,7 @@ python multi_concepts/train.py \
   --enable_xformers_memory_efficient_attention \
   --use_peft ${peft_type} \
   --wandb_mode "offline" \
-  --use_shape_description \
+  # --use_shape_description \
   # --do_not_apply_masked_prior \
   # --no_prior_preservation \
 

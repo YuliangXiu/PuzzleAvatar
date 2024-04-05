@@ -81,7 +81,7 @@ def get_face(image):
 
     bbox = bbox2(image[:, :, 0])
     cropped = image[bbox[0]:bbox[1] + 1, bbox[2]:bbox[3] + 1, :]
-    cropped = cv2.resize(cropped, (512, int(cropped.shape[0] / (cropped.shape[1] / 512))))
+    cropped = cv2.resize(cropped, (256, int(cropped.shape[0] / (cropped.shape[1] / 256))))
     preds = fa.get_landmarks(cropped, return_landmark_score=True)
 
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cropped.copy())
@@ -94,20 +94,21 @@ def get_face(image):
     detector = vision.FaceDetector.create_from_options(options)
 
     valid_groups = [
-        np.arange(3, 7),
-        np.arange(12, 16),
-        np.arange(18, 23),
-        np.arange(23, 28),
+        np.arange(1, 9),
+        np.arange(10, 18),
+        np.append(np.arange(18, 23), np.arange(37, 43)),
+        np.append(np.arange(23, 28), np.arange(43, 49)),
         np.arange(28, 37),
-        np.arange(37, 43),
-        np.arange(43, 49),
         np.arange(49, 69)
     ]
 
     try:
         face_score = detector.detect(mp_image).detections[0].categories[0].score
         valid_ids = np.where(preds[1][0] > 0.80)[0] + 1
-        if len(np.intersect1d(valid_ids, valid_groups[-1])) > 3 and face_score > 0.6:
+        if face_score > 0.6:
+            for valid_group in valid_groups:
+                if len(np.intersect1d(valid_ids, valid_group)) < 1:
+                    return False
             return True
         else:
             return False

@@ -159,6 +159,10 @@
         {
             "filePath": "data/PuzzleIOI/puzzle_cam/03595/outfit12/packed/face.png",
             "group": "Default"
+        },
+        {
+            "filePath": "data/PuzzleIOI/puzzle_cam/03594/outfit01/packed/face.png",
+            "group": "Default"
         }
     ],
     "favorites.sortOrder": "DESC"
