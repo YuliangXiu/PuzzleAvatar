@@ -130,7 +130,7 @@ class StableDiffusion(nn.Module):
             self.text_encoder.resize_token_embeddings(len(self.tokenizer))
 
         # enable FreeU
-        self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
+        # self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
 
         if is_xformers_available():
             self.unet.enable_xformers_memory_efficient_attention()

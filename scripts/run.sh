@@ -36,8 +36,9 @@ python multi_concepts/train.py \
   --lambda_attention 1e-2 \
   --img_log_steps 1000 \
   --checkpointing_steps 1000 \
+  --use_view_prompt \
   --log_checkpoints \
-  --boft_block_num=2 \
+  --boft_block_num=8 \
   --boft_block_size=0 \
   --boft_n_butterfly_factor=1 \
   --lora_r=32 \
