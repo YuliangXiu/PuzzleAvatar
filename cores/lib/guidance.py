@@ -248,9 +248,7 @@ class StableDiffusion(nn.Module):
         )
 
         # encode image into latents with vae, requires grad!
-        pred_img = F.interpolate(
-            pred_rgb, (self.res, self.res), mode='bilinear', align_corners=True
-        )
+        pred_img = F.interpolate(pred_rgb, (self.res, self.res), mode='bicubic', align_corners=True)
 
         latents = self.encode_imgs(pred_img)
 
@@ -297,9 +295,19 @@ class StableDiffusion(nn.Module):
         noise_pred_neg, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
 
         # vanilla sds: w(t), sigma_t^2
-        w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
-        # fantasia3d
-        # w = (self.alphas[t]**0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
+        w = (1 - self.alphas[t])
+
+        # # fantasia3d
+        # if stage == "geometry":
+        #     if cur_epoch <= 1000:
+        #         w = (1 - self.alphas[t])
+        #     else:
+        #         w = (self.alphas[t]**0.5 * (1 - self.alphas[t]))
+        # elif stage == "texture":
+        #     if cur_epoch <= 1000:
+        #         w = (self.alphas[t]**0.5 * (1 - self.alphas[t]))
+        #     else:
+        #         w = 1 / (1 - self.alphas[t])
 
         # original version from DreamFusion (https://dreamfusion3d.github.io/)
         # noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
@@ -311,7 +319,7 @@ class StableDiffusion(nn.Module):
         mask = (t < 200).int().view(-1, 1, 1, 1)
         negative_pred = mask * noise_pred_null + (1 - mask) * (noise_pred_null - noise_pred_neg)
 
-        grad = w * (classifier_pred + negative_pred)
+        grad = w.view(-1, 1, 1, 1) * (classifier_pred + negative_pred)
 
         grad_norm = torch.norm(grad, dim=-1, keepdim=True) + 1e-8
         grad = grad_norm.clamp(max=0.1) * grad / grad_norm

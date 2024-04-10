@@ -2,7 +2,9 @@ import argparse
 import os, sys
 import cv2
 from glob import glob
+import os.path as osp
 import numpy as np
+import trimesh
 import random
 import math
 import random
@@ -22,68 +24,39 @@ numba.config.THREADING_LAYER = 'workqueue'
 sys.path.append(os.path.join(os.getcwd()))
 
 
-def render_subject(subject, save_folder, rotation, size, egl, overwrite):
+def render_subject(subject, save_folder, rotation, size, egl):
 
     initialize_GL_context(width=size, height=size, egl=egl)
 
     scale = 100.0
     up_axis = 1
 
-    try:
-        mesh_file = glob(f"{subject}/obj/*texture.obj")[0]
-        tex_file = glob(f"{subject}/obj/*albedo.png")[0]
-    except:
-        with open("./clusters/error_eval.txt", "a") as f:
-            head = "/".join(subject.split("/")[2:-1])
-            f.write(f"{head} {' '.join(head.split('/')[-2:])}\n")
-            
-        return
+    mesh_file = glob(f"{subject}/*.obj")[0]
 
-    [person, outfit] = os.path.basename(mesh_file).split("_")[:2]
-    scan_file = f"./data/PuzzleIOI/fitting/{person}/{outfit}/scan.obj"
-    pelvis_file = glob(f"./data/PuzzleIOI/puzzle_cam/{person}/{outfit}/smplx_*.npy")[0]
-    pelvis_y = np.load(pelvis_file, allow_pickle=True).item()["pelvis_y"]
+    scan = trimesh.load_mesh(mesh_file, process=False, maintain_orders=True)
+    vertices = scan.vertices
+    vertices -= vertices.mean(axis=0)
 
-    vertices, faces, normals, faces_normals, textures, face_textures = load_scan(
-        mesh_file, with_normal=True, with_texture=True
-    )
-
-    vertices_scan, _ = load_scan(scan_file, with_normal=False, with_texture=False)
-
-    vertices[:, 1] += pelvis_y
-    vertices *= 1000.0
-
-    vertices_scan -= vertices_scan.mean(axis=0)
-
+    smplx_file = f"{subject}/smplx/smplx.obj"
+    smplx_mesh = trimesh.load_mesh(smplx_file, process=False, maintain_orders=True)
+    
     # center
-    scan_scale = 1.8 / (vertices_scan.max(0)[up_axis] - vertices_scan.min(0)[up_axis])
+    scan_scale = 1.8 / (vertices.max(0)[up_axis] - vertices.min(0)[up_axis])
     vertices *= scale
-    vertices_scan *= scale
 
-    vmin = vertices_scan.min(0)
-    vmax = vertices_scan.max(0)
+    vmin = vertices.min(0)
+    vmax = vertices.max(0)
     vmed = 0.5 * (vmax + vmin)
-    # vmed[[0, 2]] *= 0.
 
-    prt, face_prt = prt_util.computePRT(mesh_file, scale, 10, 2)
-    rndr = PRTRender(width=size, height=size, ms_rate=16, egl=egl)
-
-    # texture
-    texture_image = cv2.cvtColor(cv2.imread(tex_file), cv2.COLOR_BGR2RGB)
-
-    tan, bitan = compute_tangent(normals)
-    rndr.set_norm_mat(scan_scale, vmed)
+    rndr = ColorRender(width=size, height=size, egl=egl)
     rndr.set_mesh(
-        vertices, faces, normals, faces_normals, textures, face_textures, prt, face_prt, tan, bitan,
-        np.zeros((vertices.shape[0], 3))
+        smplx_mesh.vertices * scale * 1000.0, smplx_mesh.faces, smplx_mesh.vertices,
+        smplx_mesh.vertex_normals
     )
-    rndr.set_albedo(texture_image)
+    rndr.set_norm_mat(scan_scale, vmed)
 
     # camera
     cam = Camera(width=size, height=size)
-
-    cam.near = -100
-    cam.far = 100
 
     for y in range(0, 360, 360 // rotation):
 
@@ -92,25 +65,28 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite):
         R = opengl_util.make_rotate(0, math.radians(y), 0)
 
         rndr.rot_matrix = R
+        cam.near = -100
+        cam.far = 100
         cam.sanity_check()
         rndr.set_camera(cam)
-
-        # ==================================================================
-
         rndr.display()
 
-        rgb_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[3:]), 'render', f'{y:03d}.png'
-        )
         norm_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[3:]), 'normal', f'{y:03d}.png'
+            save_folder, "/".join(subject.split("/")[-4:]), 'body', f'{y:03d}_F.png'
         )
+        opengl_util.render_result(rndr, 1, norm_path)
 
-        if overwrite or (not os.path.exists(rgb_path)):
-            opengl_util.render_result(rndr, 0, rgb_path)
-        if overwrite or (not os.path.exists(norm_path)):
-            opengl_util.render_result(rndr, 1, norm_path)
+        # back render
+        cam.near = 100
+        cam.far = -100
+        cam.sanity_check()
+        rndr.set_camera(cam)
+        rndr.display()
 
+        norm_path = os.path.join(
+            save_folder, "/".join(subject.split("/")[-4:]), 'body', f'{y:03d}_B.png'
+        )
+        opengl_util.render_result(rndr, 1, norm_path, front=False)
     # ==================================================================
 
 
@@ -127,9 +103,6 @@ if __name__ == "__main__":
     parser.add_argument(
         '-headless', '--headless', action="store_true", help='headless rendering with EGL'
     )
-    parser.add_argument(
-        '-overwrite', '--overwrite', action="store_true", help='overwrite existing files'
-    )
     args = parser.parse_args()
 
     # rendering setup
@@ -142,10 +115,8 @@ if __name__ == "__main__":
 
     # shoud be put after PYOPENGL_PLATFORM
     import render.libs.opengl_util as opengl_util
-    from render.libs.mesh import load_scan, compute_tangent
-    import render.libs.prt_util as prt_util
     from render.libs.gl.init_gl import initialize_GL_context
-    from render.libs.gl.prt_render import PRTRender
+    from render.libs.gl.color_render import ColorRender
     from render.libs.camera import Camera
 
     print(
@@ -156,7 +127,7 @@ if __name__ == "__main__":
     os.makedirs(current_out_dir, exist_ok=True)
     print(f"Output dir: {current_out_dir}")
 
-    subjects = glob(f"./results/{args.dataset}/puzzle_cam/*/outfit*/")
+    subjects = glob(f"./data/{args.dataset}/fitting/*/outfit*/")
 
     if args.debug:
         subjects = subjects[:2]
@@ -172,7 +143,6 @@ if __name__ == "__main__":
                     rotation=args.num_views,
                     size=args.size,
                     egl=args.headless,
-                    overwrite=args.overwrite,
                 ),
                 subjects,
             ),

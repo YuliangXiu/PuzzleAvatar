@@ -24,7 +24,7 @@ numba.config.THREADING_LAYER = 'workqueue'
 sys.path.append(os.path.join(os.getcwd()))
 
 
-def render_subject(subject, dataset, save_folder, rotation, size, render_types, egl):
+def render_subject(subject, save_folder, rotation, size, egl):
 
     initialize_GL_context(width=size, height=size, egl=egl)
 
@@ -38,15 +38,6 @@ def render_subject(subject, dataset, save_folder, rotation, size, render_types, 
         mesh_file, with_normal=True, with_texture=True
     )
     vertices -= vertices.mean(axis=0)
-    
-    # mesh = trimesh.load(mesh_file, process=False, maintain_order=True)
-    # mesh = trimesh.intersections.slice_mesh_plane(mesh, [0, 1, 0], [0, -580.0, 0])
-    # vertices = mesh.vertices
-    # faces = mesh.faces
-    # normals = mesh.vertex_normals
-    # faces_normals = faces
-    # textures = mesh.visual.uv
-    # face_textures = faces
     
     
     # center
@@ -142,30 +133,23 @@ if __name__ == "__main__":
     os.makedirs(current_out_dir, exist_ok=True)
     print(f"Output dir: {current_out_dir}")
 
-    # subjects = glob(f"./data/{args.dataset}/fitting/*/outfit*/")
+    subjects = glob(f"./data/{args.dataset}/fitting/*/outfit*/")
     
-    subjects = ["./data/PuzzleIOI/fitting/03539/outfit17/"]
-
     if args.debug:
         subjects = subjects[:2]
-        render_types = ["normal"]
     else:
         random.shuffle(subjects)
-        render_types = ["normal"]
 
-    print(f"Rendering types: {render_types}")
 
     with Pool(processes=mp.cpu_count(), maxtasksperchild=1) as pool:
         for _ in tqdm(
             pool.imap_unordered(
                 partial(
                     render_subject,
-                    dataset=args.dataset,
                     save_folder=current_out_dir,
                     rotation=args.num_views,
                     size=args.size,
                     egl=args.headless,
-                    render_types=render_types,
                 ),
                 subjects,
             ),

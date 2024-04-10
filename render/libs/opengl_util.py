@@ -33,15 +33,18 @@ def projection(points, calib):
         return np.matmul(calib[:3, :3], points.T).T + calib[:3, 3]
 
 
-
-def render_result(rndr, shader_id, path, mask=False):
+def render_result(rndr, shader_id, path, mask=False, front=True):
 
     cam_render = rndr.get_color(shader_id)
     cam_render = cv2.cvtColor(cam_render, cv2.COLOR_RGBA2BGRA)
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if shader_id != 2:
-        cv2.imwrite(path, np.uint8(255.0 * cam_render).clip(0, 255))
+        if shader_id == 1:
+            cam_mask = cam_render[:, :, [0]] > 0.5 if front else cam_render[:, :, [0]] < 0.5
+            cv2.imwrite(path, np.uint8(255.0 * cam_render * cam_mask).clip(0, 255))
+        else:
+            cv2.imwrite(path, np.uint8(255.0 * cam_render).clip(0, 255))
     else:
         cam_render[:, :, -1] -= 0.5
         cam_render[:, :, -1] *= 2.0
@@ -315,11 +318,8 @@ def render_prt_ortho(
                 sh = rotateSH(sh, make_rotate(0, sh_angle, 0).T)
 
                 dic = {
-                    'sh': sh,
-                    'ortho_ratio': cam.ortho_ratio,
-                    'scale': y_scale,
-                    'center': vmed,
-                    'R': R
+                    'sh': sh, 'ortho_ratio': cam.ortho_ratio, 'scale': y_scale, 'center': vmed, 'R':
+                    R
                 }
 
                 rndr.set_sh(sh)

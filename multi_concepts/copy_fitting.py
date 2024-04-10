@@ -8,10 +8,10 @@ from glob import glob
 from tqdm import tqdm
 
 tgt_root = "./data/PuzzleIOI/fitting"
-src_root = "/ps/scratch/priyanka/alignment_yuliang_corrected"
+src_root = "/ps/project/alignments/PuzzleIOI"
 
 # copy priyanak's fitting results to the fitting folder
-for person in tqdm(os.listdir(tgt_root)):
+for person in tqdm(os.listdir(tgt_root)[::-1]):
     for motion in os.listdir(os.path.join(tgt_root, person)):
         if os.path.isdir(os.path.join(tgt_root, person, motion)):
             cur_output_dir = os.path.join(tgt_root, person, motion, "smplx")
@@ -22,10 +22,14 @@ for person in tqdm(os.listdir(tgt_root)):
                 src_obj_files = [src_obj]
                 src_pkl_files = [src_pkl]
             else:
-                src_obj_files = glob(f"{src_root}/{person}/*{motion}_seq*_0_0.obj")
-                src_pkl_files = glob(f"{src_root}/{person}/*{motion}_seq*_0_0.pkl")
-                src_obj = src_obj_files[0]
-                src_pkl = src_pkl_files[0]
+                src_obj_files = glob(f"{src_root}/{person}/*{motion}_seq*/meshes/000.obj")
+                src_pkl_files = glob(f"{src_root}/{person}/*{motion}_seq*/results/000.pkl")
+                try:
+                    src_obj = src_obj_files[0]
+                    src_pkl = src_pkl_files[0]
+                except:
+                    print(person, motion)
+                    continue
 
             tgt_obj = os.path.join(cur_output_dir, "smplx.obj")
             tgt_pkl = os.path.join(cur_output_dir, "smplx.pkl")
@@ -33,11 +37,11 @@ for person in tqdm(os.listdir(tgt_root)):
             if os.path.exists(src_obj) and os.path.exists(
                 src_pkl
             ) and len(src_obj_files) == len(src_pkl_files) == 1:
-                # if os.path.exists(tgt_obj):
-                #     os.remove(tgt_obj)
+                if os.path.exists(tgt_obj):
+                    os.remove(tgt_obj)
                 copyfile(src_obj, tgt_obj)
-                # if os.path.exists(tgt_pkl):
-                #     os.remove(tgt_pkl)
+                if os.path.exists(tgt_pkl):
+                    os.remove(tgt_pkl)
                 copyfile(src_pkl, tgt_pkl)
             else:
                 print(f"{src_obj} or {src_pkl} not exists \n")

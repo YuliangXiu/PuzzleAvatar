@@ -529,7 +529,6 @@ class Trainer(object):
             text_z = self.text_z
             text_z_novd = self.text_z
 
-
         guidance_loss = self.guidance.train_step(
             text_z,
             pred_rgb,
@@ -848,7 +847,7 @@ class Trainer(object):
                 np.concatenate([all_preds[:100], all_preds_norm[:100]], axis=2),
                 np.concatenate([all_preds[100:], all_preds_norm[100:]], axis=2),
             ],
-                                            axis=2)
+                                            axis=1)
             if self.cfg.stage == 'texture':
                 imageio.mimwrite(
                     os.path.join(save_path, f'{name}_rgb.mp4'),

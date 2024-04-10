@@ -17,7 +17,7 @@ from .tet_utils import build_tet_grid
 from .uv_utils import texture_padding
 
 
-def scale_img_nhwc(x, size, mag='bilinear', min='bilinear'):
+def scale_img_nhwc(x, size, mag='bicubic', min='bilinear'):
     assert (x.shape[1] >= size[0] and x.shape[2] >= size[1]) or (
         x.shape[1] < size[0] and x.shape[2] < size[1]
     ), "Trying to magnify image in one dimension and minify in the other"

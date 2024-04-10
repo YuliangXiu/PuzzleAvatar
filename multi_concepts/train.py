@@ -183,12 +183,6 @@ def parse_args():
         help="The weight of prior preservation loss.",
     )
     parser.add_argument(
-        "--norm_loss_weight",
-        type=float,
-        default=1.0,
-        help="The weight of prior preservation loss on normals.",
-    )
-    parser.add_argument(
         "--mask_loss_weight",
         type=float,
         default=1.0,
@@ -849,7 +843,7 @@ class DreamBoothDataset(Dataset):
 
         for attn_cls in ['face']:
             if attn_cls in self.class_tokens[index % example_len]:
-                sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 2.0
+                sample_prop[self.class_tokens[index % example_len].index(attn_cls)] = 3.0
 
         sample_prop /= sample_prop.sum()
 

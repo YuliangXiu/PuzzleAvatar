@@ -51,7 +51,7 @@ def grid_save(dir):
         big_image.save(osp.join(dir, f"final_{mode}.png"))
 
 
-def render_subject(subject, dataset, save_folder, rotation, size, render_types, egl):
+def render_subject(subject, dataset, save_folder, rotation, size, render_types, egl, overwrite):
 
     initialize_GL_context(width=size, height=size, egl=egl)
 
@@ -102,19 +102,20 @@ def render_subject(subject, dataset, save_folder, rotation, size, render_types, 
 
             if mode == 'body':
                 cam.ortho_ratio = (512 / size) * 0.4 * np.random.uniform(0.5, 1.3)
-                cam.center[up_axis] = np.random.uniform(-0.5, 0.5) * scale
+                cam.center[up_axis] = np.random.uniform(-0.4, 0.4) * scale
                 # cam.center[up_axis] = 0.0
-                cam.up = np.dot(
-                    np.array([0., 1., 0.]),
-                    opengl_util.make_rotate(math.radians(np.random.uniform(-60, 60)), 0, 0)
-                )
-            else:
-                cam.ortho_ratio = (512 / size) * 0.4 * np.random.uniform(0.3, 0.4)
-                cam.center[up_axis] = 0.8 * scale
                 cam.up = np.dot(
                     np.array([0., 1., 0.]),
                     opengl_util.make_rotate(math.radians(np.random.uniform(-30, 30)), 0, 0)
                 )
+            else:
+                cam.ortho_ratio = (512 / size) * 0.4 * np.random.uniform(0.3, 0.4)
+                cam.center[up_axis] = 0.8 * scale
+                # cam.up = np.dot(
+                #     np.array([0., 1., 0.]),
+                #     opengl_util.make_rotate(math.radians(np.random.uniform(-30, 30)), 0, 0)
+                # )
+                cam.up = np.array([0., 1., 0.])
 
             R = opengl_util.make_rotate(0, math.radians(y), 0)
 
@@ -144,9 +145,9 @@ def render_subject(subject, dataset, save_folder, rotation, size, render_types, 
             rgb_path = os.path.join(save_folder, subject, 'render', f'{mode}_{y:03d}.png')
             norm_path = os.path.join(save_folder, subject, 'normal', f'{mode}_{y:03d}.png')
 
-            if not os.path.exists(rgb_path):
+            if overwrite or (not os.path.exists(rgb_path)):
                 opengl_util.render_result(rndr, 0, rgb_path)
-            if not os.path.exists(norm_path):
+            if overwrite or (not os.path.exists(norm_path)):
                 opengl_util.render_result(rndr, 1, norm_path)
 
     # grid_save(os.path.join(save_folder, subject, 'normal'))
@@ -166,6 +167,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '-headless', '--headless', action="store_true", help='headless rendering with EGL'
+    )
+    parser.add_argument(
+        '-overwrite', '--overwrite', action="store_true", help='overwrite existing files'
     )
     args = parser.parse_args()
 
@@ -215,6 +219,7 @@ if __name__ == "__main__":
                     size=args.size,
                     egl=args.headless,
                     render_types=render_types,
+                    overwrite=args.overwrite,
                 ),
                 subjects,
             ),

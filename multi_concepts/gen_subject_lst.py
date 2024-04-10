@@ -3,7 +3,7 @@ import sys
 import json
 import numpy as np
 
-data_root = "./data/PuzzleIOI/puzzle_cam"
+data_root = "./data/PuzzleIOI/fitting"
 error_file = "./clusters/error.txt"
 # error_lst = np.loadtxt(error_file, dtype=str)
 
@@ -35,9 +35,10 @@ error_file = "./clusters/error.txt"
 with open("./clusters/subjects_all.txt", "w") as f:
     for subject in os.listdir(data_root):
         for motion in os.listdir(os.path.join(data_root, subject)):
-            os.makedirs(os.path.join("./logs", subject, motion), exist_ok=True)
-            line_path = '/'.join(os.path.join(data_root, subject, motion).split('/')[2:])
-            line = f"{line_path} {subject} {motion}\n"
-            f.write(line)
+            if motion not in ["apose", "full.jpg"]:
+                os.makedirs(os.path.join("./logs", subject, motion), exist_ok=True)
+                line_path = '/'.join(os.path.join(data_root, subject, motion).split('/')[2:])
+                line = f"{line_path.replace('fitting', 'puzzle_cam')} {subject} {motion}\n"
+                f.write(line)
 
                 

@@ -1,9 +1,9 @@
-executable = ./scripts/run.sh
-arguments = data/$(dir) results/$(dir) $(subject)_$(outfit)
+executable = ./scripts/shape_color.sh
+arguments = $(dir) $(subject)_$(outfit)
 
-error = ./logs/$(subject)/$(outfit)/run.err
-output = ./logs/$(subject)/$(outfit)/run.out
-log = ./logs/$(subject)/$(outfit)/run.log
+error = ./logs/$(subject)/$(outfit)/shape_color.err
+output = ./logs/$(subject)/$(outfit)/shape_color.out
+log = ./logs/$(subject)/$(outfit)/shape_color.log
 
 request_memory = 20000
 request_disk = 5G
