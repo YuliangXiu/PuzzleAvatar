@@ -17,15 +17,15 @@ train:
     normal_sample_ratio: 1.0
     radius_range: [0.5, 1.3]
     height_range: [-0.4, 0.4]
-    theta_range: [60, 120]
+    theta_range: [30, 150]
     phi_diff: 30
     jitter_pose: False
-    face_sample_ratio: 0.3
+    face_sample_ratio: 0.5
     face_height_range: [0., 0.]
     face_radius_range: [0.3, 0.4]
     face_phi_diff: 30
-    face_theta_range: [90, 90]
-    face_phi_range: [-180, 180]
+    face_theta_range: [60, 120]
+    face_phi_range: [-90, 90]
     render_relative_normal: True
     lambda_lap: 0.
     lambda_eik: 0.

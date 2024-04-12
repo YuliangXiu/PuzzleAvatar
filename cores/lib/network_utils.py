@@ -282,6 +282,6 @@ class HashDecoder(nn.Module):
         if self.use_eikonal:
             sdf_grad = self.numerical_gradient(points)
         else:
-            sdf_grad = torch.tensor(0.0).to(sdf)
+            sdf_grad = torch.tensor([0.0]).to(sdf)
 
         return [sdf, sdf_grad]

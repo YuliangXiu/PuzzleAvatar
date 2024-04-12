@@ -29,6 +29,9 @@ def run(subject_outfit, evaluator):
         results[subject][outfit].update(evaluator.calculate_visual_similarity())
     else:
         print(f"Missing {subject_outfit}")
+        with open("./clusters/error_eval.txt", "a") as f:
+            head = f"PuzzleIOI/puzzle_cam/{subject}/{outfit}"
+            f.write(f"{head} {subject} {outfit}\n")
 
 
 def init_pool(dictX):
@@ -64,7 +67,10 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     os.environ['OPENBLAS_NUM_THREADS'] = f"{mp.cpu_count()}"
     
-    all_outfits = glob(f"{data_root}/*/outfit*/")
+    # all_outfits = glob(f"{data_root}/*/outfit*/")
+    
+    all_outfits = np.loadtxt("clusters/subjects_all.txt", dtype=str, delimiter=" ")[:,0]
+    all_outfits = [f"./data/{outfit}/" for outfit in all_outfits]
 
     # overwrite the results.npy file
     if (not os.path.exists(results_path)) or args.overwrite:

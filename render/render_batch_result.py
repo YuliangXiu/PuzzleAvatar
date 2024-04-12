@@ -36,7 +36,7 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite):
         with open("./clusters/error_eval.txt", "a") as f:
             head = "/".join(subject.split("/")[2:-1])
             f.write(f"{head} {' '.join(head.split('/')[-2:])}\n")
-            
+
         return
 
     [person, outfit] = os.path.basename(mesh_file).split("_")[:2]
@@ -156,7 +156,8 @@ if __name__ == "__main__":
     os.makedirs(current_out_dir, exist_ok=True)
     print(f"Output dir: {current_out_dir}")
 
-    subjects = glob(f"./results/{args.dataset}/puzzle_cam/*/outfit*/")
+    subjects = np.loadtxt("clusters/subjects_all.txt", dtype=str, delimiter=" ")[:, 0]
+    subjects = [f"./results/{outfit}/" for outfit in subjects]
 
     if args.debug:
         subjects = subjects[:2]

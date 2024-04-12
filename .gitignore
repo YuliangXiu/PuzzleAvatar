@@ -11,7 +11,7 @@ logs
 *.egg-info
 *.pt
 *.txt
-.vscode
+.vscode/settings.json
 tmp
 wandb
 OPENAI_API_KEY

@@ -57,8 +57,9 @@ def compact_tets(pos_nx3, sdf_n, tet_fx4):
         occ_n = sdf_n > 0
         occ_fx4 = occ_n[tet_fx4.reshape(-1)].reshape(-1, 4)
         occ_sum = torch.sum(occ_fx4, -1)
-        valid_tets = (occ_sum > 0) & (occ_sum < 4)    # one value per tet, these are the surface tets
-        
+        valid_tets = (occ_sum
+                      > 0) & (occ_sum < 4)    # one value per tet, these are the surface tets
+
         valid_vtx = tet_fx4[valid_tets].reshape(-1)
         unique_vtx, idx_map = torch.unique(valid_vtx, dim=0, return_inverse=True)
         new_pos = pos_nx3[unique_vtx]
@@ -160,15 +161,19 @@ class DMTetMesh(nn.Module):
         self.num_subdiv = num_subdiv
 
     def query_decoder(self, tet_v):
-        if self.tet_v.shape[0] < 1000000:
+        chunk_size = 1000000
+        if self.tet_v.shape[0] < chunk_size:
             return self.decoder(tet_v)
         else:
-            chunk_size = 1000000
-            results = []
+            chunk_size = chunk_size
+            results1 = []
+            results2 = []
             for i in range((tet_v.shape[0] // chunk_size) + 1):
                 if i * chunk_size < tet_v.shape[0]:
-                    results.append(self.decoder(tet_v[i * chunk_size:(i + 1) * chunk_size]))
-            return torch.cat(results, dim=0)
+                    res1, res2 = self.decoder(tet_v[i * chunk_size:(i + 1) * chunk_size])
+                    results1.append(res1)
+                    results2.append(res2)
+            return torch.cat(results1, dim=0), torch.cat(results2, dim=0)
 
     def get_mesh(self, num_subdiv=None):
         if num_subdiv is None:
@@ -245,10 +250,10 @@ class DMTetMesh(nn.Module):
                 )    # + (deform ** 2).mean()
 
                 # if self.use_eikonal:
-                eikonal_loss = (sdf_grad.norm(dim=-1) - 1.).abs().mean()
-                loss = recon_loss + eikonal_loss * 0.000
+                # eikonal_loss = (sdf_grad.norm(dim=-1) - 1.).abs().mean()
+                # loss = recon_loss + eikonal_loss * 0.000
                 # else:
-                # loss = recon_loss
+                loss = recon_loss
 
                 optimizer.zero_grad()
                 loss.backward()

@@ -11,4 +11,4 @@ request_cpus = 8
 request_gpus = 1
 requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDAGlobalMemoryMb > 35000)
 
-queue dir,subject,outfit from ./clusters/subjects_all.txt
+queue dir,subject,outfit from ./clusters/characters.txt
