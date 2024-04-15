@@ -1,0 +1,78 @@
+hydra:
+  run:
+    dir: ${exp_dir}/hydra
+  sweep:
+    dir: ${exp_dir}/hydra
+    subdir: ID${hydra.job.id} 
+    
+expname: dev/tmp
+exp_dir: output/${expname}
+output_dir: ${exp_dir}
+
+
+pretrained_model_name_or_path: ashawkey/mvdream-sd2.1-diffusers
+revision: null
+variant: null
+tokenizer_name: null
+# instance_data_dir: null
+# class_data_dir: null
+# instance_prompt: null
+# class_prompt: null
+instance_data_dir: data/xiu_full
+class_data_dir: data/mv_man_full
+instance_prompt: a high-resolution DSLR colored image of a sks man spreading his arms
+class_prompt: a high-resolution DSLR colored image of a man spreading his arms
+
+with_prior_preservation: false
+prior_loss_weight: 1.0
+num_class_images: 100
+
+seed: null
+resolution: 512
+center_crop: false
+train_text_encoder: false
+train_batch_size: 4
+sample_batch_size: 4
+num_train_epochs: 1
+max_train_steps: 2000
+checkpointing_steps: 500
+checkpoints_total_limit: null
+resume_from_checkpoint: null
+gradient_accumulation_steps: 1
+gradient_checkpointing: false
+learning_rate: 5e-6
+scale_lr: false
+lr_scheduler: constant
+lr_warmup_steps: 500
+lr_num_cycles: 1
+lr_power: 1.0
+use_8bit_adam: false
+dataloader_num_workers: 0
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.01
+adam_epsilon: 1e-08
+max_grad_norm: 1.0
+push_to_hub: false
+hub_token: null
+hub_model_id: null
+logging_dir: logs
+allow_tf32: false
+report_to: tensorboard
+validation_prompt: ${instance_prompt}
+num_validation_images: 4
+validation_steps: 100
+mixed_precision: null
+prior_generation_precision: null
+local_rank: -1
+enable_xformers_memory_efficient_attention: false
+set_grads_to_none: false
+offset_noise: false
+snr_gamma: null
+pre_compute_text_embeddings: false
+tokenizer_max_length: null
+text_encoder_use_attention_mask: false
+skip_save_text_encoder: false
+validation_images: null
+class_labels_conditioning: null
+validation_scheduler: DPMSolverMultistepScheduler
