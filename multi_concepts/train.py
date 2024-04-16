@@ -1127,7 +1127,7 @@ class SpatialDreambooth:
         self.attn_mask_cache = {}
         self.class_ids = []
         self.save_attn_mask_cache = False
-        if 'base' in self.args.pretrained_model_name_or_path:
+        if 'base' in self.args.pretrained_model_name_or_path or 'mvdream' in self.args.pretrained_model_name_or_path:    
             self.attn_res = 16
             self.mask_res = 64
             self.args.resolution = 512

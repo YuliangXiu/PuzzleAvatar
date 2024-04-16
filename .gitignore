@@ -1,3 +1,5 @@
+outputs/
+thirdparties/*
 __pycache__
 data/*
 !data/human

@@ -1,0 +1,103 @@
+  --pretrained_model_name_or_path $BASE_MODEL \
+  --project_name ${SUBJECT_NAME} \
+  --instance_data_dir ${INPUT_DIR}  \
+  --output_dir ${EXP_DIR} \
+  --class_data_dir data/multi_concepts_data \
+  --train_batch_size 1  \
+  --phase1_train_steps 1000 \
+  --phase2_train_steps 4000 \
+  --lr_step_rules "1:2000,0.1" \
+  --initial_learning_rate 5e-4 \
+  --learning_rate 2e-6 \
+  --prior_loss_weight 1.0 \
+  --syn_loss_weight 2.0 \
+  --mask_loss_weight 1.0 \
+  --lambda_attention 1e-2 \
+  --img_log_steps 1000 \
+  --checkpointing_steps 1000 \
+  --use_view_prompt \
+  --log_checkpoints \
+  --boft_block_num=8 \
+  --boft_block_size=0 \
+  --boft_n_butterfly_factor=1 \
+  --lora_r=32 \
+  --enable_xformers_memory_efficient_attention \
+  --use_peft ${peft_type} \
+  --wandb_mode "offline" \
+
+
+pretrained_model_name_or_path: "stabilityai/stable-diffusion-2-1"
+revision: null
+tokenizer_name: null
+project_name: 
+gender: null
+instance_data_dir: 
+class_data_dir:
+class_prompt:
+no_prior_preservation: false
+use_shape_description: false
+prior_loss_weight: 1.0
+mask_loss_weight: 1.0
+syn_loss_weight: 1.0
+num_class_images: 100
+output_dir: outputs
+seed: 1993
+resolution: 768
+center_crop: false
+train_text_encoder: true
+train_batch_size: 1
+sample_batch_size: 1
+num_train_epochs: 1
+max_train_steps: 2000
+phase1_train_steps: 1000
+phase2_train_steps: 4000
+checkpointing_steps: 1000
+resume_from_checkpoint: null
+gradient_accumulation_steps: 1
+gradient_checkpointing: false
+learning_rate: 2e-6
+initial_learning_rate: 5e-4
+scale_lr: false
+lr_scheduler: piecewise_constant
+lr_step_rules: "1:2000,0.1"
+lr_warmup_steps: 0
+lr_num_cycles: 1
+lr_power: 1.0
+use_8bit_adam: false
+dataloader_num_workers: 0
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.01
+adam_epsilon: 1e-08
+max_grad_norm: 1.0
+hub_token: null
+hub_model_id: null
+logging_dir: logs
+allow_tf32: false
+report_to: wandb
+wandb_mode: offline
+mixed_precision: fp16
+prior_generation_precision: null
+local_rank: -1
+enable_xformers_memory_efficient_attention: false
+set_grads_to_none: false
+use_peft: none
+boft_block_num: 4
+boft_block_size: 0
+boft_n_butterfly_factor: 2
+boft_bias_fit: false
+boft_dropout: 0.1
+boft_bias: none
+lora_r: 64
+lambda_attention: 0.01
+img_log_steps: 200
+num_of_assets: 1
+initializer_tokens: []
+placeholder_token: <asset>
+apply_masked_loss: true
+apply_masked_prior: true
+log_checkpoints: false
+use_view_prompt: true
+
+    args = parser.parse_args()
+

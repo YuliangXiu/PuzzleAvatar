@@ -1,0 +1,9 @@
+**.swp
+*.pt
+*.yaml
+**/__pycache__
+*.pyc
+
+weights*
+models
+sd-v2*
