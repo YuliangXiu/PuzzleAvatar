@@ -354,16 +354,16 @@ class Evaluation:
         mesh = trimesh.load(mesh_file, process=False)
 
         if is_scan:
-            scan_center = mesh.vertices.mean(axis=0)
+            self.scan_center = mesh.vertices.mean(axis=0)
             mesh = trimesh.intersections.slice_mesh_plane(mesh, [0, 1, 0], [0, -580.0, 0])
             if not use_pyrender:
-                mesh.vertices -= scan_center
+                mesh.vertices -= self.scan_center
             mesh.vertices /= 1000.0
         else:
             mesh.vertices[:, 1] += self.pelvis_y
             if use_pyrender:
                 mesh.vertices *= 1000.0
-                mesh.vertices += scan_center
+                mesh.vertices += self.scan_center
                 mesh.vertices /= 1000.0
 
         if use_pyrender:
@@ -450,6 +450,8 @@ class Evaluation_EASY:
         self.result_geo_root = result_geo_root
         self.result_img_root = result_img_root
         self.results = {}
+        
+        self.name = self.result_geo_root.split("/")[-1]
 
         self.scan_file = None
         self.recon_file = None
@@ -476,14 +478,27 @@ class Evaluation_EASY:
 
         # geo path
         self.scan_file = os.path.join(self.data_root, subject, outfit, "scan.obj")
-        recon_name = f"{subject}_{outfit}_texture"
-        self.recon_file = os.path.join(
-            self.result_geo_root, subject, outfit, f"obj/{recon_name}.obj"
-        )
-        self.pelvis_file = glob(
-            os.path.join(self.data_root.replace("fitting", "puzzle_cam"), subject, outfit) +
-            "/smplx_*.npy"
-        )
+        
+        if self.name == 'puzzle_cam':
+            recon_name = f"{subject}_{outfit}_texture"
+            self.recon_file = os.path.join(
+                self.result_geo_root, subject, outfit, f"obj/{recon_name}.obj"
+            )
+            self.pelvis_file = glob(
+                os.path.join(self.data_root.replace("fitting", "puzzle_cam"), subject, outfit) +
+                "/smplx_*.npy"
+            )
+        elif self.name == 'tech':
+            recon_name = f"07_C_texture"
+            self.recon_file = os.path.join(
+                self.result_geo_root, subject, outfit, f"obj/{recon_name}.obj"
+            )
+            self.pelvis_file = os.path.join(
+                self.result_geo_root, subject, outfit, "obj/07_C_smpl.npy"
+            )
+        else:
+            raise ValueError("Invalid dataset name")
+            
         self.smplx_file = os.path.join(self.data_root, subject, outfit, "smplx/smplx.obj")
 
         # tex path
@@ -496,7 +511,13 @@ class Evaluation_EASY:
     def load_assets(self):
 
         # geo data
-        self.pelvis_y = np.load(self.pelvis_file[0], allow_pickle=True).item()["pelvis_y"]
+        if self.name == "puzzle_cam":
+            self.pelvis_y = np.load(self.pelvis_file[0], allow_pickle=True).item()["pelvis_y"]
+        elif self.name == "tech":
+            self.pelvis_y = np.load(self.pelvis_file, allow_pickle=True).item()
+        else:
+            raise ValueError("Invalid dataset name")
+        
         self.scan = self.load_mesh(self.scan_file, is_scan=True)
         self.recon = self.load_mesh(self.recon_file)
         self.smplx = trimesh.load(self.smplx_file, process=False)
@@ -519,12 +540,22 @@ class Evaluation_EASY:
         mesh = trimesh.load(mesh_file, process=False)
 
         if is_scan:
-            scan_center = mesh.vertices.mean(axis=0)
+            self.scan_center = mesh.vertices.mean(axis=0)
             mesh = trimesh.intersections.slice_mesh_plane(mesh, [0, 1, 0], [0, -580.0, 0])
-            mesh.vertices -= scan_center
+            mesh.vertices -= self.scan_center
             mesh.vertices /= 1000.0
         else:
-            mesh.vertices[:, 1] += self.pelvis_y
+            if self.name == "puzzle_cam":
+                mesh.vertices[:, 1] += self.pelvis_y
+            elif self.name == "tech":
+                smpl_scale = self.pelvis_y["scale"].cpu().numpy()
+                smpl_trans = self.pelvis_y["transl"].cpu().numpy()
+                smpl_model_trans = smpl_trans - np.array([-0.06, -0.40, 0.0]) - self.scan_center / 1000.0
+                
+                mesh.vertices /= smpl_scale
+                mesh.vertices -= smpl_trans
+                mesh.vertices += smpl_model_trans
+                
 
         return mesh
 

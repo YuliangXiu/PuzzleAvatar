@@ -32,28 +32,34 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite):
     try:
         mesh_file = glob(f"{subject}/obj/*texture.obj")[0]
         tex_file = glob(f"{subject}/obj/*albedo.png")[0]
+        smpl_file = glob(f"{subject}/obj/*smpl.npy")[0]
     except:
-        with open("./clusters/error_eval.txt", "a") as f:
+        with open("./clusters/error_eval_tech.txt", "a") as f:
             head = "/".join(subject.split("/")[2:-1])
             f.write(f"{head} {' '.join(head.split('/')[-2:])}\n")
 
         return
 
-    [person, outfit] = os.path.basename(mesh_file).split("_")[:2]
+    [person, outfit] = mesh_file.split("/")[-4:-2]
     scan_file = f"./data/PuzzleIOI/fitting/{person}/{outfit}/scan.obj"
-    pelvis_file = glob(f"./data/PuzzleIOI/puzzle_cam/{person}/{outfit}/smplx_*.npy")[0]
-    pelvis_y = np.load(pelvis_file, allow_pickle=True).item()["pelvis_y"]
 
     vertices, faces, normals, faces_normals, textures, face_textures = load_scan(
         mesh_file, with_normal=True, with_texture=True
     )
 
     vertices_scan, _ = load_scan(scan_file, with_normal=False, with_texture=False)
+    scan_center = vertices_scan.mean(axis=0)
+    vertices_scan -= scan_center
 
-    vertices[:, 1] += pelvis_y
+    smpl_data = np.load(smpl_file, allow_pickle=True).item()
+    smpl_scale = smpl_data["scale"].cpu().numpy()
+    smpl_trans = smpl_data["transl"].cpu().numpy()
+    smpl_model_trans = smpl_trans - np.array([-0.06, -0.40, 0.0]) - scan_center / 1000.0
+
+    vertices /= smpl_scale
+    vertices -= smpl_trans
+    vertices += smpl_model_trans
     vertices *= 1000.0
-
-    vertices_scan -= vertices_scan.mean(axis=0)
 
     # center
     scan_scale = 1.8 / (vertices_scan.max(0)[up_axis] - vertices_scan.min(0)[up_axis])
@@ -100,10 +106,12 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite):
         rndr.display()
 
         rgb_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[3:]), 'render', f'{y:03d}.png'
+            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech"), 'render',
+            f'{y:03d}.png'
         )
         norm_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[3:]), 'normal', f'{y:03d}.png'
+            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech"), 'normal',
+            f'{y:03d}.png'
         )
 
         if overwrite or (not os.path.exists(rgb_path)):
@@ -157,7 +165,7 @@ if __name__ == "__main__":
     print(f"Output dir: {current_out_dir}")
 
     subjects = np.loadtxt("clusters/subjects_all.txt", dtype=str, delimiter=" ")[:, 0]
-    subjects = [f"./results/{outfit}/" for outfit in subjects]
+    subjects = [f"../TeCH/results/{outfit.replace('puzzle_cam', 'fitting')}" for outfit in subjects]
     # subjects = [item for item in subjects if "03619" in item or "03633" in item]
 
     if args.debug:

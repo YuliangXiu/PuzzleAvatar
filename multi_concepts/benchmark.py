@@ -17,7 +17,7 @@ from matplotlib.ticker import PercentFormatter
 from multi_concepts.puzzle_utils import Evaluation_EASY as Evaluation
 
 
-def run(subject_outfit, evaluator):
+def run(subject_outfit, evaluator, name):
 
     subject, outfit = subject_outfit.split("/")[-3:-1]
 
@@ -29,8 +29,8 @@ def run(subject_outfit, evaluator):
         results[subject][outfit].update(evaluator.calculate_visual_similarity())
     else:
         print(f"Missing {subject_outfit}")
-        with open("./clusters/error_eval.txt", "a") as f:
-            head = f"PuzzleIOI/puzzle_cam/{subject}/{outfit}"
+        with open(f"./clusters/error_eval_{name}.txt", "a") as f:
+            head = f"PuzzleIOI/{name}/{subject}/{outfit}"
             f.write(f"{head} {subject} {outfit}\n")
 
 
@@ -57,12 +57,16 @@ if __name__ == "__main__":
     parser.add_argument(
         '-overwrite', '--overwrite', action="store_true", help='overwrite existing files'
     )
+    parser.add_argument(
+        '-name', '--name', type=str, default="puzzle_cam", help='dataset name'
+    )
     args = parser.parse_args()
+    
 
     data_root = "./data/PuzzleIOI/fitting"
-    result_geo_root = "./results/PuzzleIOI/puzzle_cam"
+    result_geo_root = f"./results/PuzzleIOI/{args.name}"
     result_img_root = "./data/PuzzleIOI_4views"
-    results_path = "./results/PuzzleIOI/results.npy"
+    results_path = f"./results/PuzzleIOI/results_{args.name}.npy"
 
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     os.environ['OPENBLAS_NUM_THREADS'] = f"{mp.cpu_count()}"
@@ -106,6 +110,7 @@ if __name__ == "__main__":
                             evaluator=Evaluation(
                                 data_root, result_geo_root, result_img_root, torch.device("cuda:0")
                             ),
+                            name=args.name,
                         ),
                         all_outfits,
                     ),
@@ -127,10 +132,19 @@ if __name__ == "__main__":
         for outfit in results[subject].keys():
             if sorted(total_metrics.keys()) == sorted(results[subject][outfit].keys()):
                 for key in total_metrics.keys():
+                    if np.isnan(results[subject][outfit][key]):
+                        print(f"Missing {subject}/{outfit}/{key}")
                     total_metrics[key].append(results[subject][outfit][key])
 
+    latex_lst = []
     for key in total_metrics.keys():
-        print(f"{key}: {np.mean(total_metrics[key]):.3f}")
+        print(f"{key}: {np.nanmean(total_metrics[key]):.3f}")
+        latex_lst.append(np.nanmean(total_metrics[key]))
+        
+    print(" & ".join([f"{item:.3f}" for item in latex_lst]))
+        
+    
+    
 
     # plot the histogram
 
