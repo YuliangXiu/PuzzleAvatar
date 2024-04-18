@@ -21,9 +21,9 @@ fi
 export peft_type="none"
 
 # Step 1: Run multi-concept DreamBooth training
-rm -rf ${EXP_DIR}/text_encoder
-rm -rf ${EXP_DIR}/unet
-rm -rf ${EXP_DIR}/img_logs
+# rm -rf ${EXP_DIR}/text_encoder
+# rm -rf ${EXP_DIR}/unet
+# rm -rf ${EXP_DIR}/img_logs
 
 
 # # Step 2: Run multi-concept DreamBooth inference

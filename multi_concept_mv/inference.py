@@ -115,6 +115,7 @@ class BreakASceneInference:
             )
 
         else:
+            # import pdb; pdb.set_trace()
             self.pipeline = Pipeline.from_pretrained(
                 self.args.model_dir,
                 torch_dtype=torch.float32,
@@ -137,7 +138,7 @@ class BreakASceneInference:
     @torch.no_grad()
     def infer_and_save(self, prompts, tokens):
         mvdream = "mvdream" in self.args.pretrained_model_name_or_path
-        group_size = 8
+        group_size = 1 #8
 
         os.makedirs(self.args.output_dir, exist_ok=True)
 
@@ -152,7 +153,9 @@ class BreakASceneInference:
                 prompt_group,
                 negative_prompt=[negative_prompt] * batch_size,
                 guidance_scale=7.5,
-                num_inference_steps=50
+                num_inference_steps=50,
+                num_frames=1,
+                output_type='pil',
             )
             if not mvdream:
                 images =  images.images

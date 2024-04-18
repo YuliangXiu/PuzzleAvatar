@@ -21,10 +21,13 @@ fi
 export peft_type="none"
 
 # Step 1: Run multi-concept DreamBooth training
-rm -rf ${EXP_DIR}/text_encoder
-rm -rf ${EXP_DIR}/unet
-rm -rf ${EXP_DIR}/img_logs
+# rm -rf ${EXP_DIR}/text_encoder
+# rm -rf ${EXP_DIR}/unet
+# rm -rf ${EXP_DIR}/img_logs
 
+num=1000
+num_2=4000
+# 4000 \
 python -m multi_concept_mv.train_puzzlebooth \
   --pretrained_model_name_or_path $BASE_MODEL \
   --project_name ${SUBJECT_NAME} \
@@ -32,8 +35,8 @@ python -m multi_concept_mv.train_puzzlebooth \
   --output_dir ${EXP_DIR} \
   --class_data_dir data/multi_concepts_data \
   --train_batch_size 1  \
-  --phase1_train_steps 1000 \
-  --phase2_train_steps 4000 \
+  --phase1_train_steps ${num} \
+  --phase2_train_steps ${num_2} \
   --lr_step_rules "1:2000,0.1" \
   --initial_learning_rate 5e-4 \
   --learning_rate 2e-6 \
@@ -41,8 +44,8 @@ python -m multi_concept_mv.train_puzzlebooth \
   --syn_loss_weight 2.0 \
   --mask_loss_weight 1.0 \
   --lambda_attention 1e-2 \
-  --img_log_steps 1000 \
-  --checkpointing_steps 1000 \
+  --img_log_steps ${num} \
+  --checkpointing_steps ${num} \
   --use_view_prompt \
   --log_checkpoints \
   --boft_block_num=8 \

@@ -9,7 +9,7 @@ bash multi_concept_mv/test_puzzlebooth.sh \
 bash multi_concept_mv/train_puzzlebooth.sh \
         data/human/yuliang/ \
         output/puzzle_int \
-        guitar mv \
+        traintest mv \
 
 
 
@@ -17,7 +17,7 @@ python -m mpi_utils.mpi_wrapper --sl_time 1 --sl_cuda 8.5 \
     bash multi_concept_mv/train_puzzlebooth.sh \
         data/human/yuliang/ \
         output/puzzle_remote \
-        guitar mv \
+        traintest mv \
 
 
 # dreambooth MVFusion by xiu 

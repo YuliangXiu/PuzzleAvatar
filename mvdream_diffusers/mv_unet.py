@@ -13,7 +13,7 @@ from einops import rearrange, repeat
 from typing import Dict, Union
 from diffusers.loaders import PeftAdapterMixin, UNet2DConditionLoadersMixin
 
-from diffusers.configuration_utils import ConfigMixin
+from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.attention_processor import (
     AttentionProcessor,
@@ -210,6 +210,15 @@ class MemoryEfficientCrossAttention(nn.Module):
         upcast_attention=False,
         upcast_softmax=False,
         scale_qk=True,
+        only_cross_attention: bool = False,
+        norm_num_groups: Optional[int] = None,
+        spatial_norm_dim: Optional[int] = None,
+        cross_attention_norm: Optional[str] = None,
+        added_kv_proj_dim: Optional[int] = None,
+        residual_connection: bool = False,
+        # cross_attention_norm_num_groups: int = 32,
+        rescale_output_factor: float = 1.0,
+
         processor: Optional["AttnProcessor"] = None,
     ):
         super().__init__()
@@ -226,6 +235,30 @@ class MemoryEfficientCrossAttention(nn.Module):
         self.scale_qk = scale_qk
         self.scale = dim_head**-0.5 if self.scale_qk else 1.0
         self.upcast_softmax = upcast_softmax
+        self.added_kv_proj_dim = added_kv_proj_dim
+        self.only_cross_attention = only_cross_attention
+        self.rescale_output_factor = rescale_output_factor
+        self.residual_connection = residual_connection
+
+        if self.added_kv_proj_dim is None and self.only_cross_attention:
+            raise ValueError(
+                "`only_cross_attention` can only be set to True if `added_kv_proj_dim` is not None. Make sure to set either `only_cross_attention=False` or define `added_kv_proj_dim`."
+            )
+
+        if norm_num_groups is not None:
+            self.group_norm = nn.GroupNorm(num_channels=query_dim, num_groups=norm_num_groups, eps=eps, affine=True)
+        else:
+            self.group_norm = None
+
+        if spatial_norm_dim is not None:
+            self.spatial_norm = SpatialNorm(f_channels=query_dim, zq_channels=spatial_norm_dim)
+        else:
+            self.spatial_norm = None
+
+        if cross_attention_norm is None:
+            self.norm_cross = None
+        else:
+            raise ValueError(f"cross_attention_norm {cross_attention_norm} not supported.")
 
         if self.ip_dim > 0:
             self.to_k_ip = nn.Linear(context_dim, inner_dim, bias=False)
@@ -1184,7 +1217,7 @@ class MultiViewUNetModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin, P
                                     increased efficiency.
     :param camera_dim: dimensionality of camera input.
     """
-
+    @register_to_config
     def __init__(
         self,
         image_size,
@@ -1267,6 +1300,7 @@ class MultiViewUNetModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin, P
         self.num_head_channels = num_head_channels
         self.num_heads_upsample = num_heads_upsample
         self.predict_codebook_ids = n_embed is not None
+
 
         self.ip_dim = ip_dim
         self.ip_weight = ip_weight
@@ -1509,7 +1543,6 @@ class MultiViewUNetModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin, P
         ), "must specify y if and only if the model is class-conditional"
 
         hs = []
-
         t_emb = timestep_embedding(
             timesteps, self.model_channels, repeat_only=False
         ).to(x.dtype)

@@ -1,3 +1,4 @@
+output/
 outputs/
 thirdparties/*
 __pycache__

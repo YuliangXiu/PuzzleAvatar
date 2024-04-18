@@ -1216,7 +1216,7 @@ class SpatialDreambooth:
             self.attn_res = 24
             self.mask_res = 96
             self.args.resolution = 768
-
+        self.mvdream = 'mvdream' in self.args.pretrained_model_name_or_path
         self.main()
 
     def main(self):
@@ -1519,7 +1519,6 @@ class SpatialDreambooth:
                                 )
                                 if not mvdream: 
                                     images = images[0]
-                                # print('attention after forward', self.controller.attention_store.keys())
 
                                 for batch_idx in range(self.args.sample_batch_size):
                                     hash_image = hashlib.sha1(
@@ -2379,7 +2378,6 @@ class SpatialDreambooth:
     def register_attention_control(self, controller):
         attn_procs = {}
         cross_att_count = 0
-        print("attention processor", self.unet.attn_processors.keys())
         # attn_processor
         with open(osp.basename(self.args.pretrained_model_name_or_path) + ".txt", "w") as f:
             for key in self.unet.attn_processors.keys():
@@ -2398,7 +2396,6 @@ class SpatialDreambooth:
             down_key = 'down_blocks'
 
         for name in self.unet.attn_processors.keys():
-            # print(name)
             # if name.startswith("mid_block"):
             if name.startswith(mid_key):
                 place_in_unet = "mid"
@@ -2492,11 +2489,15 @@ class SpatialDreambooth:
             latent_model_input = self.validation_scheduler.scale_model_input(
                 latent_model_input, timestep=t
             )
-
+            bs = latent_model_input.shape[0]
+            timesteps = t[None].repeat(bs, ).to(self.accelerator.device)
             pred = self.unet(
-                latent_model_input, t, encoder_hidden_states=text_embeddings
+                latent_model_input, timesteps, text_embeddings
             )
-            noise_pred = pred.sample
+            if not self.mvdream:
+                noise_pred = pred.sample
+            else:
+                noise_pred = pred
 
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
             noise_pred = noise_pred_uncond + guidance_scale * (
