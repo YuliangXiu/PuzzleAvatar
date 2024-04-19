@@ -450,7 +450,7 @@ class Evaluation_EASY:
         self.result_geo_root = result_geo_root
         self.result_img_root = result_img_root
         self.results = {}
-        
+
         self.name = self.result_geo_root.split("/")[-1]
 
         self.scan_file = None
@@ -478,7 +478,7 @@ class Evaluation_EASY:
 
         # geo path
         self.scan_file = os.path.join(self.data_root, subject, outfit, "scan.obj")
-        
+
         if self.name == 'puzzle_cam':
             recon_name = f"{subject}_{outfit}_texture"
             self.recon_file = os.path.join(
@@ -498,7 +498,7 @@ class Evaluation_EASY:
             )
         else:
             raise ValueError("Invalid dataset name")
-            
+
         self.smplx_file = os.path.join(self.data_root, subject, outfit, "smplx/smplx.obj")
 
         # tex path
@@ -517,7 +517,7 @@ class Evaluation_EASY:
             self.pelvis_y = np.load(self.pelvis_file, allow_pickle=True).item()
         else:
             raise ValueError("Invalid dataset name")
-        
+
         self.scan = self.load_mesh(self.scan_file, is_scan=True)
         self.recon = self.load_mesh(self.recon_file)
         self.smplx = trimesh.load(self.smplx_file, process=False)
@@ -550,12 +550,12 @@ class Evaluation_EASY:
             elif self.name == "tech":
                 smpl_scale = self.pelvis_y["scale"].cpu().numpy()
                 smpl_trans = self.pelvis_y["transl"].cpu().numpy()
-                smpl_model_trans = smpl_trans - np.array([-0.06, -0.40, 0.0]) - self.scan_center / 1000.0
-                
+                smpl_model_trans = smpl_trans - np.array([-0.06, -0.40, 0.0]
+                                                        ) - self.scan_center / 1000.0
+
                 mesh.vertices /= smpl_scale
                 mesh.vertices -= smpl_trans
                 mesh.vertices += smpl_model_trans
-                
 
         return mesh
 
@@ -617,6 +617,10 @@ class Evaluation_EASY:
         samples_src, _, _ = sample_points_from_meshes(src_mesh, 100000)
         src_points = Pointclouds(samples_src)
         p2s_dist2 = point_mesh_distance(tgt_mesh, src_points)[0].sum() * 100.0
+
+        # self.scan.export(f"./tmp/{self.subject}_{self.outfit}_scan.obj")
+        # self.recon.export(f"./tmp/{self.subject}_{self.outfit}_recon.obj")
+        # self.smplx.export(f"./tmp/{self.subject}_{self.outfit}_smplx.obj")
 
         chamfer_dist = 0.5 * (p2s_dist1 + p2s_dist2)
 
@@ -704,6 +708,6 @@ class PyRenderer:
 
         scan_color, _ = r.render(self.scene, flags=pyrender.constants.RenderFlags.FLAT)
         self.scene.clear()
-        mask_arr = (scan_color.sum(2)[...,None] != 255 * 3) * (scan_color[:, :, [2]] > 0.5 * 255.0)
+        mask_arr = (scan_color.sum(2)[..., None] != 255 * 3) * (scan_color[:, :, [2]] > 0.5 * 255.0)
 
         return np.concatenate([scan_color, (mask_arr * 255).astype(np.uint8)], axis=2)

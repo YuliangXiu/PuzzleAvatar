@@ -5,7 +5,7 @@ model:
     tet_offset_scale: 0.
     tet_grid_volume: 5e-8
     tet_num_subdiv: 1
-    render_ssaa: 4
+    render_ssaa: 3
     geo_hash_max_res: 1024
 train:
     lr: 0.001

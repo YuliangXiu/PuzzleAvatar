@@ -1,43 +1,38 @@
 <p align="center">
 
-  <h2 align="center">TeCH: Text-guided Reconstruction of Lifelike Clothed Humans</h2>
+  <h2 align="center">PuzzleAvatar:<br> Assembly of Avatar from Unconstrained Photo Collections</h2>
   <p align="center">
-    <a href="https://github.com/huangyangyi"><strong>Yangyi Huang*</strong></a>
+    <a href="https://xiuyuliang.cn/"><strong>Yuliang Xiu</strong></a>
     ·  
-    <a href="https://xyyhw.top/"><strong>Hongwei Yi*</strong></a>
+    <a href="https://judyye.github.io/"><strong>Yufei Ye</strong></a>
     ·
-    <a href="http://xiuyuliang.cn/"><strong>Yuliang Xiu*</strong></a>
+    <a href="https://itszhen.com/"><strong>Zhen Liu</strong></a>
     ·
-    <a href="https://github.com/TingtingLiao"><strong>Tingting Liao</strong></a>
+    <a href="https://dtzionas.com/"><strong>Dimitris Tzionas</strong></a>
     ·
-    <a href="https://me.kiui.moe/"><strong>Jiaxiang Tang</strong></a>
-    ·
-    <a href="http://www.cad.zju.edu.cn/home/dengcai/"><strong>Deng Cai</strong></a>
-    ·
-    <a href="https://justusthies.github.io/"><strong>Justus Thies</strong></a>
+    <a href="https://ps.is.mpg.de/person/black"><strong>Michael J. Black</strong></a>
     <br>
-    * Equal contribution
   </p>
-  <h2 align="center">3DV 2024</h2>
-  <div align="center">
-    <video autoplay loop muted src="https://github.com/huangyangyi/TeCH/assets/7944350/f8fc55ed-9cbe-4b5f-bd1d-237396360713" type=video/mp4>
+  <h2 align="center">arXiv 2024</h2>
+  <!-- <div align="center">
+    <video autoplay loop muted src="" type=video/mp4>
     </video>
-  </div>
+  </div> -->
 
   <p align="center">
   </br>
-    <a href="https://arxiv.org/abs/2308.08545">
+    <a href="">
       <img src='https://img.shields.io/badge/Paper-PDF-green?style=for-the-badge&logo=adobeacrobatreader&logoWidth=20&logoColor=white&labelColor=66cc00&color=94DD15' alt='Paper PDF'>
     </a>
-    <a href='https://huangyangyi.github.io/TeCH'>
-      <img src='https://img.shields.io/badge/TeCH-Page-orange?style=for-the-badge&logo=Google%20chrome&logoColor=white&labelColor=D35400' alt='Project Page'></a>
-    <a href="https://youtu.be/SjzQ6158Pho"><img alt="youtube views" title="Subscribe to my YouTube channel" src="https://img.shields.io/youtube/views/SjzQ6158Pho?logo=youtube&labelColor=ce4630&style=for-the-badge"/></a>
+    <a href=''>
+      <img src='https://img.shields.io/badge/PuzzleAvatar-Page-orange?style=for-the-badge&logo=Google%20chrome&logoColor=white&labelColor=D35400' alt='Project Page'></a>
+    <a href=""><img alt="youtube views" title="Subscribe to my YouTube channel" src="https://img.shields.io/youtube/views/SjzQ6158Pho?logo=youtube&labelColor=ce4630&style=for-the-badge"/></a>
   </p>
 </p>
 
 <br/>
 
-TeCH considers image-based reconstruction as a conditional generation task, taking conditions from both the input image and the derived descriptions. It is capable of reconstructing "lifelike" 3D clothed humans. <strong>“Lifelike”</strong> refers to 1) a detailed full-body geometry, including facial features and clothing wrinkles, in both frontal and unseen regions, and 2) a high-quality texture with consistent color and intricate patterns.
+
 <br/>
 
 ## Installation
@@ -58,25 +53,48 @@ The results will be saved in the experiment folder `exp/examples/name`, and the 
 
 It is noted that in "Step 3", the current version of Dreambooth implementation requires 2\*32G GPU memory. And 1\*32G GPU memory is efficient for other steps. The entire training process for a subject takes ~3 hours on our V100 GPUs.
 
-## TODOs
-
-- [ ] Release of evaluation protocols and results data for comparison (on CAPE & THUman 2.0 datasets).
-- [ ] Switch to the diffuser version of DreamBooth to save training memory.
-- [ ] Further improvement of efficiency and robustness.
 
 ## Citation
 
 ```bibtex
-@inproceedings{huang2024tech,
-  title={{TeCH: Text-guided Reconstruction of Lifelike Clothed Humans}},
-  author={Huang, Yangyi and Yi, Hongwei and Xiu, Yuliang and Liao, Tingting and Tang, Jiaxiang and Cai, Deng and Thies, Justus},
-  booktitle={International Conference on 3D Vision (3DV)},
+@inproceedings{xiu2024puzzleavatar,
+  title={{PuzzleAvatar: Assembly of Avatar from Unconstrained Photo Collections}},
+  author={Xiu, Yuliang and Ye, Yufei and Liu, Zhen and Tzionas, Dimitrios and Black, Michael J.},
+  booktitle={arXov},
   year={2024}
 }
 ```
-## License
-This code and model are available only for **non-commercial** research purposes as defined in the LICENSE (i.e., MIT LICENSE). 
-Note that, using TeCH, you have to register SMPL-X and agree with the LICENSE of it, and it's not MIT LICENSE, you can check the LICENSE of SMPL-X from https://github.com/vchoutas/smplx/blob/main/LICENSE.
 
 ## Acknowledgment
-This implementation is mainly built based on [Stable Dreamfusion](https://github.com/ashawkey/stable-dreamfusion), [ECON](https://github.com/YuliangXiu/ECON), [DreamBooth-Stable-Diffusion](https://github.com/XavierXiao/Dreambooth-Stable-Diffusion), and the BLIP API from Salesforce on [Replicate](https://replicate.com/salesforce/blip)
+This implementation is mainly built based on [TeCH](https://github.com/huangyangyi/TeCH), [BOFT-DreamBooth](https://github.com/huggingface/peft/blob/main/examples/boft_dreambooth/train_dreambooth.py), [Stable Dreamfusion](https://github.com/ashawkey/stable-dreamfusion), [ECON](https://github.com/YuliangXiu/ECON)
+
+This project has received funding from the European Union’s Horizon 2020 research and innovation programme under the Marie Skłodowska-Curie grant agreement No.860768 ([CLIPE Project](https://www.clipe-itn.eu)).
+
+## Contributors
+
+Kudos to all of our amazing contributors! PuzzleAvatar thrives through open-source. In that spirit, we welcome all kinds of contributions from the community.
+
+<a href="https://github.com/yuliangxiu/PuzzleAvatar/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=yuliangxiu/PuzzleAvatar" />
+</a>
+
+_Contributor avatars are randomly shuffled._
+
+---
+
+<br>
+
+## License
+
+This code and model are available for non-commercial scientific research purposes as defined in the [LICENSE](LICENSE) file. By downloading and using the code and model you agree to the terms in the [LICENSE](LICENSE).
+
+## Disclosure
+
+MJB has received research gift funds from Adobe, Intel, Nvidia, Meta/Facebook, and Amazon. MJB has financial interests in Amazon, Datagen Technologies, and Meshcapade GmbH. While MJB is a part-time employee of Meshcapade, his research was performed solely at, and funded solely by, the Max Planck Society.
+
+## Contact
+
+For technical questions, please contact yuliang.xiu@tue.mpg.de
+
+For commercial licensing, please contact ps-licensing@tue.mpg.de
+

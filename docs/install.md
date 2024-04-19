@@ -14,7 +14,6 @@ apt-get install -y libglfw3-dev libgles2-mesa-dev libglib2.0-0 libosmesa6-dev
 conda create --name TeCH python=3.10
 conda activate TeCH
 
-# export TORCH_CUDA_ARCH_LIST="7.0,7.2,7.5,8.0,8.6,8.7,8.9,9.0,9.0a"
 pip install pytorch torchvision tobarchaudio
 pip install -r requirements.txt
 python install_pytorch3d.py

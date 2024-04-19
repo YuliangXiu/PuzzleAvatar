@@ -402,7 +402,9 @@ if __name__ == '__main__':
                                 mask_other += mask_final[other_cls_id]
                             mask_final[cls_id] = mask * (mask_other == 0)
 
-                        if (mask_final[cls_id]).sum() > 500:
+                        mask_area = mask_final[cls_id].shape[0] * mask_final[cls_id].shape[1]
+
+                        if (mask_final[cls_id]).sum() / mask_area > 0.001:
                             if CLASSES[cls_id] not in ["eyeglasses", "glasses"]:
 
                                 keep = True
