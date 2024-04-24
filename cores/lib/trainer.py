@@ -588,6 +588,7 @@ class Trainer(object):
         else:
             shading = data['shading'] if 'shading' in data else 'albedo'
             ambient_ratio = data['ambient_ratio'] if 'ambient_ratio' in data else 1.0
+            
         light_d = data['light_d'] if 'light_d' in data else None
 
         outputs = self.model(
@@ -604,6 +605,7 @@ class Trainer(object):
         )
         pred_rgb = outputs['image'].reshape(1, H, W, 3)
         pred_depth = outputs['depth'].reshape(1, H, W)
+        
         outputs_normal = self.model(
             rays_o,
             rays_d,
@@ -617,10 +619,11 @@ class Trainer(object):
             global_step=self.global_step
         )
         pred_norm = outputs_normal['image'].reshape(1, H, W, 3)
+        pred_alpha = outputs['alpha'].reshape(1, H, W, 1)
         # dummy
         loss = torch.zeros([1], device=pred_rgb.device, dtype=pred_rgb.dtype)
 
-        return pred_rgb, pred_depth, pred_norm, loss
+        return pred_rgb, pred_depth, pred_norm, pred_alpha, loss
 
     def test_step(
         self, data, bg_color=None, perturb=False, mesh=None, can_pose=False, no_resize=False
@@ -750,7 +753,7 @@ class Trainer(object):
         name=None,
         write_video=True,
         can_pose=False,
-        write_image=False
+        write_image=True
     ):
 
         if save_path is None:
@@ -773,14 +776,15 @@ class Trainer(object):
 
         if write_video:
             all_preds = []
-            all_preds_depth = []
+            # all_preds_depth = []
             all_preds_norm = []
             all_openpose_map = []
 
         # save front image for comparison
         if "PuzzleIOI" in save_path:
             from shutil import copyfile
-            subject, outfit = save_path.split("/")[3:5]
+            start_idx = save_path.split("/").index("puzzle_cam")
+            subject, outfit = save_path.split("/")[start_idx+1:start_idx+3]
             src_front_image = os.path.join(
                 "data", "PuzzleIOI", "fitting", subject, outfit, "images", "07_C.jpg"
             )
@@ -807,20 +811,22 @@ class Trainer(object):
                 pred_norm = preds_norm[0].detach().cpu().numpy()
                 pred_norm = ((pred_norm * preds_alpha + (1 - preds_alpha)) * 255).astype(np.uint8)
 
-                pred_depth = preds_depth[0].detach().cpu().numpy()
-                pred_depth = (pred_depth -
-                              pred_depth.min()) / (pred_depth.max() - pred_depth.min() + 1e-6)
-                pred_depth = (pred_depth * 255).astype(np.uint8)
+                # pred_depth = preds_depth[0].detach().cpu().numpy()
+                # pred_depth = (pred_depth -
+                #               pred_depth.min()) / (pred_depth.max() - pred_depth.min() + 1e-6)
+                # pred_depth = (pred_depth * 255).astype(np.uint8)
+
                 if self.render_openpose:
 
                     openpose_map = (openpose_map[0].detach().cpu().numpy() * 255).astype(np.uint8)
 
                 if write_video:
                     all_preds.append(pred)
-                    all_preds_depth.append(pred_depth)
+                    # all_preds_depth.append(pred_depth)
                     all_preds_norm.append(pred_norm)
                     if self.render_openpose:
                         all_openpose_map.append(openpose_map)
+
                 if write_image and i % 10 == 0:
                     if isinstance(preds_alpha, torch.Tensor):
                         preds_alpha = preds_alpha[0].detach().cpu().numpy()
@@ -831,7 +837,7 @@ class Trainer(object):
                         os.path.join(save_path, f'{name}_{i:04d}_rgb.png'),
                         cv2.cvtColor(pred, cv2.COLOR_RGBA2BGRA)
                     )
-                    cv2.imwrite(os.path.join(save_path, f'{name}_{i:04d}_depth.png'), pred_depth)
+                    # cv2.imwrite(os.path.join(save_path, f'{name}_{i:04d}_depth.png'), pred_depth)
                     cv2.imwrite(
                         os.path.join(save_path, f'{name}_{i:04d}_norm.png'),
                         cv2.cvtColor(pred_norm, cv2.COLOR_RGBA2BGRA)
@@ -841,17 +847,20 @@ class Trainer(object):
 
         if write_video:
             all_preds = np.stack(all_preds, axis=0)
-            all_preds_depth = np.stack(all_preds_depth, axis=0)
+            # all_preds_depth = np.stack(all_preds_depth, axis=0)
             all_preds_norm = np.stack(all_preds_norm, axis=0)
+            # all_preds_norm[100:] = 255 - all_preds_norm[100:]
+
+            frame_size = 100
             all_preds_full = np.concatenate([
-                np.concatenate([all_preds[:100], all_preds_norm[:100]], axis=2),
-                np.concatenate([all_preds[100:], all_preds_norm[100:]], axis=2),
+                np.concatenate([all_preds[:frame_size], all_preds_norm[:frame_size]], axis=2),
+                np.concatenate([all_preds[frame_size:], all_preds_norm[frame_size:]], axis=2),
             ],
                                             axis=1)
             if self.cfg.stage == 'texture':
                 imageio.mimwrite(
                     os.path.join(save_path, f'{name}_rgb.mp4'),
-                    all_preds[:100],
+                    all_preds[:frame_size],
                     fps=25,
                     quality=8,
                     macro_block_size=1
@@ -864,15 +873,22 @@ class Trainer(object):
                 macro_block_size=1
             )
             imageio.mimwrite(
-                os.path.join(save_path, f'{name}_depth.mp4'),
-                all_preds_depth[:100],
+                os.path.join(save_path, f'{name}_head.mp4'),
+                all_preds_norm[frame_size:],
                 fps=25,
                 quality=8,
                 macro_block_size=1
             )
+            # imageio.mimwrite(
+            #     os.path.join(save_path, f'{name}_depth.mp4'),
+            #     all_preds_depth[:100],
+            #     fps=25,
+            #     quality=8,
+            #     macro_block_size=1
+            # )
             imageio.mimwrite(
                 os.path.join(save_path, f'{name}_norm.mp4'),
-                all_preds_norm[:100],
+                all_preds_norm[:frame_size],
                 fps=25,
                 quality=8,
                 macro_block_size=1
@@ -1013,7 +1029,12 @@ class Trainer(object):
                 self.local_step += 1
 
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-                    preds, preds_depth, preds_normal, loss = self.eval_step(data)
+                    preds, preds_depth, preds_normal, preds_alpha, loss = self.eval_step(data)
+
+                # add alpha channel
+                preds = preds * preds_alpha + (1 - preds_alpha)
+                preds_normal = preds_normal * preds_alpha + (1 - preds_alpha)
+                preds_depth = preds_depth * preds_alpha + (1 - preds_alpha)
 
                 # all_gather/reduce the statistics (NCCL only support all_*)
                 if self.world_size > 1:
@@ -1056,20 +1077,32 @@ class Trainer(object):
                     pred_normal = preds_normal[0].detach().cpu().numpy()
                     pred_normal = (pred_normal * 255).astype(np.uint8)
 
-                    if self.stage == "geometry":
-                        save_geo_lst.append(cv2.cvtColor(pred_normal, cv2.COLOR_RGB2BGR))
-                    elif self.stage == "texture":
+                    save_geo_lst.append(cv2.cvtColor(pred_normal, cv2.COLOR_RGB2BGR))
+                    if self.stage == "texture":
                         save_tex_lst.append(cv2.cvtColor(pred, cv2.COLOR_RGB2BGR))
-                    else:
-                        print(f"Unknown stage {self.stage}")
 
                     pbar.set_description(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f})")
                     pbar.update(loader.batch_size)
 
-            if self.stage == "geometry":
-                cv2.imwrite(save_path_geo, np.concatenate(save_geo_lst, 1))
+            if len(save_geo_lst) % 2 == 0:
+                col_size = len(save_geo_lst) // 2
+                save_geo_arr = np.concatenate([
+                    np.concatenate(save_geo_lst[:col_size], 1),
+                    np.concatenate(save_geo_lst[col_size:], 1)
+                ], 0)
+                if self.stage == "texture":
+                    save_tex_arr = np.concatenate([
+                        np.concatenate(save_tex_lst[:col_size], 1),
+                        np.concatenate(save_tex_lst[col_size:], 1)
+                    ], 0)
+            else:
+                save_geo_arr = np.concatenate(save_geo_lst, 1)
+                if self.stage == "texture":
+                    save_tex_arr = np.concatenate(save_tex_lst, 1)
+
+            cv2.imwrite(save_path_geo, save_geo_arr)
             if self.stage == "texture":
-                cv2.imwrite(save_path_tex, np.concatenate(save_tex_lst, 1))
+                cv2.imwrite(save_path_tex, save_tex_arr)
 
         average_loss = total_loss / self.local_step
         self.stats["valid_loss"].append(average_loss)

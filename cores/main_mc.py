@@ -112,9 +112,11 @@ if __name__ == '__main__':
         cfg.guidance.hf_key = opt.exp_dir
 
     if cfg.guidance.text is None:
-        with open(
-            os.path.join(opt.exp_dir.replace("results", "data"), 'gpt4v_simple.json'), 'r'
-        ) as f:
+        json_path = os.path.join(
+            "./data", "/".join(opt.exp_dir.split("/")[-4:]), "gpt4v_simple.json"
+        )
+
+        with open(json_path, 'r') as f:
             gpt4v_response = json.load(f)
             gender, cfg.guidance.text, cfg.guidance.text_head, placeholders = dict_to_prompt(
                 gpt4v_response, opt.use_shape_description
@@ -124,8 +126,13 @@ if __name__ == '__main__':
             print(f"Using head prompt: {cfg.guidance.text_head}")
 
     # create smplx base meshes wrt gender
-    smplx_path = os.path.join(opt.exp_dir.replace("results", "data"), f"smplx_{gender}.obj")
-    keypoint_path = os.path.join(opt.exp_dir.replace("results", "data"), f"smplx_{gender}.npy")
+
+    smplx_path = os.path.join(
+        "./data", "/".join(opt.exp_dir.split("/")[-4:]), f"smplx_{gender}.obj"
+    )
+    keypoint_path = os.path.join(
+        "./data", "/".join(opt.exp_dir.split("/")[-4:]), f"smplx_{gender}.npy"
+    )
 
     cfg.data.last_model = smplx_path
     cfg.data.keypoints_path = keypoint_path
@@ -154,7 +161,7 @@ if __name__ == '__main__':
         if use_puzzle:
 
             smpl_param_path = os.path.join(
-                opt.exp_dir.replace("results", "data").replace("puzzle_cam", "fitting"),
+                "./data", "/".join(opt.exp_dir.split("/")[-4:]).replace("puzzle_cam", "fitting"),
                 "smplx/smplx.pkl"
             )
             print(f"SMPL pkl path: {smpl_param_path}")
@@ -287,7 +294,7 @@ if __name__ == '__main__':
         )
 
         valid_loader = ViewDataset(
-            cfg, device=device, type='val', H=cfg.test.H, W=cfg.test.W, size=5
+            cfg, device=device, type='val', H=cfg.test.H, W=cfg.test.W, size=5, render_head=True
         ).dataloader()
 
         max_epoch = np.ceil(cfg.train.iters / len(train_loader)).astype(np.int32)

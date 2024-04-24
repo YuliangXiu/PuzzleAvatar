@@ -5,10 +5,12 @@ error = ./logs/$(subject)/$(outfit)/train_multi_concepts.err
 output = ./logs/$(subject)/$(outfit)/train_multi_concepts.out
 log = ./logs/$(subject)/$(outfit)/train_multi_concepts.log
 
-request_memory = 20000
+request_memory = 100000
 request_disk = 5G
 request_cpus = 20
 request_gpus = 1
-requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g093" && TARGET.CUDAGlobalMemoryMb > 35000)
+requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g164" && UtsnameNodename =!= "g093" && UtsnameNodename =!= "i107" && TARGET.CUDAGlobalMemoryMb > 35000)
 
-queue dir,subject,outfit from ./clusters/error.txt
+max_materialize = 300
+
+queue dir,subject,outfit from ./clusters/failed_sd.txt

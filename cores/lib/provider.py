@@ -300,17 +300,34 @@ class ViewDataset:
         focal = self.H / (2 * np.tan(np.deg2rad(fov) / 2))
         intrinsics = np.array([focal, focal, self.cx, self.cy])
 
-        projection = torch.tensor([[2 * focal / self.W, 0, 0, 0], [0, -2 * focal / self.H, 0, 0],
-                                   [
-                                       0, 0, -(self.far + self.near) / (self.far - self.near),
-                                       -(2 * self.far * self.near) / (self.far - self.near)
-                                   ], [0, 0, -1, 0]],
+        projection = torch.tensor([
+            [2 * focal / self.W, 0, 0, 0],
+            [0, -2 * focal / self.H, 0, 0],
+            [
+                0, 0, -(self.far + self.near) /
+                (self.far - self.near), -(2 * self.far * self.near) / (self.far - self.near)
+            ],
+            [0, 0, -1, 0],
+        ],
                                   dtype=torch.float32,
                                   device=self.device).unsqueeze(0)    # yapf: disabl
+
         mvp = projection @ torch.inverse(poses.cpu()).to(self.device)
+        
         if not self.training:
             if is_face or can_pose:
                 mvp = projection @ torch.inverse(poses.cpu()).to(self.device)
+                # mvp = torch.inverse(poses.cpu()).to(self.device)
+                # mvp[0, 2, 3] = 0.
+                # TO_WORLD = np.eye(
+                #     4,
+                #     dtype=np.float32,
+                # )
+                # TO_WORLD[2, 2] = -1
+                # TO_WORLD[1, 1] = -7
+                # TO_WORLD[0, 0] = 7
+                # TO_WORLD = mvp.new_tensor(TO_WORLD)
+                # mvp = TO_WORLD @ mvp
             else:
                 mvp = torch.inverse(poses.cpu()).to(self.device)
                 mvp[0, 2, 3] = 0.

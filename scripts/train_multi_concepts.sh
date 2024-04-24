@@ -26,7 +26,7 @@ python multi_concepts/train.py \
   --initial_learning_rate 5e-4 \
   --learning_rate 2e-6 \
   --prior_loss_weight 1.0 \
-  --syn_loss_weight 2.0 \
+  --syn_loss_weight "2.0,2.0" \
   --mask_loss_weight 1.0 \
   --lambda_attention 1e-2 \
   --img_log_steps 1000 \
@@ -36,12 +36,12 @@ python multi_concepts/train.py \
   --boft_block_num=8 \
   --boft_block_size=0 \
   --boft_n_butterfly_factor=1 \
-  --lora_r=32 \
+  --lora_r=16 \
   --enable_xformers_memory_efficient_attention \
   --use_peft ${peft_type} \
   --wandb_mode "offline" \
-  # --use_shape_description \
   # --do_not_apply_masked_prior \
+  # --use_shape_description \
   # --no_prior_preservation \
 
 # Step 2: Run multi-concept DreamBooth inference
@@ -52,4 +52,4 @@ python multi_concepts/inference.py \
   --instance_dir ${INPUT_DIR} \
   --num_samples 10 \
   --use_peft ${peft_type} \
-  --use_shape_description \
+  # --use_shape_description \

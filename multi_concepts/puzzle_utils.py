@@ -297,158 +297,12 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from torchmetrics.image import StructuralSimilarityIndexMeasure
 
 
-class Evaluation:
-    def __init__(self, data_root, result_root, device):
-        self.data_root = data_root
-        self.result_root = result_root
-        self.cameras = cameras
-        self.results = {}
-
-        self.scene = pyrender.Scene()
-        self.light = pyrender.SpotLight(
-            color=np.ones(3),
-            intensity=50.0,
-            innerConeAngle=np.pi / 16.0,
-            outerConeAngle=np.pi / 6.0
-        )
-
-        self.scan_file = None
-        self.recon_file = None
-        self.pelvis_file = None
-        self.scan = None
-        self.scan_center = None
-        self.recon = None
-
-        self.ref_img = None
-
-        self.subject = None
-        self.outfit = None
-
-        self.device = device
-
-        # metrics
-        self.psnr = PeakSignalNoiseRatio()
-        self.lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
-        self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
-
-    def load_assets(self, subject, outfit):
-        self.scan_file = os.path.join(self.data_root, subject, outfit, "scan.obj")
-        recon_name = f"{subject}_{outfit}_texture"
-        self.recon_file = os.path.join(self.result_root, subject, outfit, f"obj/{recon_name}.obj")
-        self.pelvis_file = glob(
-            os.path.join(self.data_root.replace("fitting", "puzzle_cam"), subject, outfit) +
-            "/smplx_*.npy"
-        )
-        self.smplx_path = os.path.join(self.data_root, subject, outfit, "smplx/smplx.obj")
-
-        self.pelvis_y = np.load(self.pelvis_file[0], allow_pickle=True).item()["pelvis_y"]
-
-        self.scan = self.load_mesh(self.scan_file, is_scan=True, use_pyrender=True)
-        self.recon = self.load_mesh(self.recon_file, use_pyrender=True)
-
-        self.subject = subject
-        self.outfit = outfit
-
-    def load_mesh(self, mesh_file, is_scan=False, use_pyrender=False):
-
-        mesh = trimesh.load(mesh_file, process=False)
-
-        if is_scan:
-            self.scan_center = mesh.vertices.mean(axis=0)
-            mesh = trimesh.intersections.slice_mesh_plane(mesh, [0, 1, 0], [0, -580.0, 0])
-            if not use_pyrender:
-                mesh.vertices -= self.scan_center
-            mesh.vertices /= 1000.0
-        else:
-            mesh.vertices[:, 1] += self.pelvis_y
-            if use_pyrender:
-                mesh.vertices *= 1000.0
-                mesh.vertices += self.scan_center
-                mesh.vertices /= 1000.0
-
-        if use_pyrender:
-            mesh = pyrender.Mesh.from_trimesh(mesh)
-        return mesh
-
-    def calculate_visual_similarity(self, cam_id):
-
-        assert isinstance(self.scan, pyrender.Mesh) and isinstance(self.recon, pyrender.Mesh)
-
-        ref_img = plt.imread(
-            os.path.join(self.data_root, self.subject, self.outfit, f"{cam_id}.jpg")
-        )
-        camera_cali = self.cameras[cam_id]
-        r = pyrender.OffscreenRenderer(ref_img.shape[1], ref_img.shape[0])
-        camera = pyrender.camera.IntrinsicsCamera(
-            camera_cali['fx'], camera_cali['fy'], camera_cali['c_x'], camera_cali['c_y']
-        )
-        camera_pose = camera_cali['extrinsic']
-        self.scene.add(camera, pose=camera_pose)
-        self.scene.add(self.light, pose=camera_pose)
-
-        self.scene.add(self.scan, name="scan")
-        scan_color, _ = r.render(self.scene)
-        scan_mask = (scan_color == scan_color[0, 0]).sum(axis=2, keepdims=True) != 3
-        self.scene.remove_node(self.scene.get_node("scan"))
-
-        self.scene.add(self.recon, name="recon")
-        recon_color, _ = r.render(self.scene)
-        self.scene.clear()
-
-        render_dict = {
-            "scan_color": scan_color * scan_mask,
-            "recon_color": recon_color * scan_mask,
-        }
-
-        metrics = self.similarity(render_dict)
-
-        return metrics
-
-    def similarity(self, render_dict):
-        psnr_diff = self.psnr(
-            torch.tensor(render_dict["scan_color"]).permute(2, 0, 1).unsqueeze(0),
-            torch.tensor(render_dict["recon_color"]).permute(2, 0, 1).unsqueeze(0)
-        )
-        ssim_diff = self.ssim(
-            torch.tensor(render_dict["scan_color"]).permute(2, 0, 1).unsqueeze(0),
-            torch.tensor(render_dict["recon_color"]).permute(2, 0, 1).unsqueeze(0)
-        )
-        lpips_diff = self.lpips(
-            torch.tensor(render_dict["scan_color"]).permute(2, 0, 1).unsqueeze(0),
-            torch.tensor(render_dict["recon_color"]).permute(2, 0, 1).unsqueeze(0)
-        )
-
-        return {"psnr": psnr_diff, "ssim": ssim_diff, "lpips": lpips_diff}
-
-    def calculate_p2s(self):
-
-        # reload scan and mesh
-        scan = self.load_mesh(self.scan_file, is_scan=True, use_pyrender=False)
-        recon = self.load_mesh(self.recon_file, use_pyrender=False)
-
-        tgt_mesh = Meshes(
-            verts=[torch.tensor(scan.vertices).float()], faces=[torch.tensor(scan.faces).long()]
-        ).to(self.device)
-        src_mesh = Meshes(
-            verts=[torch.tensor(recon.vertices).float()], faces=[torch.tensor(recon.faces).long()]
-        ).to(self.device)
-
-        tgt_points = Pointclouds(tgt_mesh.verts_packed().unsqueeze(0))
-        p2s_dist1 = point_mesh_distance(src_mesh, tgt_points)[0].sum() * 100.0
-
-        samples_src, _, _ = sample_points_from_meshes(src_mesh, 100000)
-        src_points = Pointclouds(samples_src)
-        p2s_dist2 = point_mesh_distance(tgt_mesh, src_points)[0].sum() * 100.0
-
-        chamfer_dist = 0.5 * (p2s_dist1 + p2s_dist2)
-        return p2s_dist1, chamfer_dist
-
-
 class Evaluation_EASY:
-    def __init__(self, data_root, result_geo_root, result_img_root, device):
+    def __init__(self, data_root, result_geo_root, result_img_root, device, tag):
         self.data_root = data_root
         self.result_geo_root = result_geo_root
         self.result_img_root = result_img_root
+        self.tag = tag
         self.results = {}
 
         self.name = self.result_geo_root.split("/")[-1]
@@ -503,7 +357,14 @@ class Evaluation_EASY:
 
         # tex path
         self.render_gt_dir = os.path.join(self.result_img_root, "fitting", subject, outfit)
-        self.render_recon_dir = os.path.join(self.result_img_root, "puzzle_cam", subject, outfit)
+        if self.name == 'puzzle_cam':
+            self.render_recon_dir = os.path.join(
+                self.result_img_root, f"puzzle_cam_{self.tag}", subject, outfit
+            )
+        elif self.name == 'tech':
+            self.render_recon_dir = os.path.join(
+                self.result_img_root, f"tech_{self.tag}", subject, outfit
+            )
 
         self.subject = subject
         self.outfit = outfit
@@ -541,7 +402,7 @@ class Evaluation_EASY:
 
         if is_scan:
             self.scan_center = mesh.vertices.mean(axis=0)
-            mesh = trimesh.intersections.slice_mesh_plane(mesh, [0, 1, 0], [0, -580.0, 0])
+            mesh = trimesh.intersections.slice_mesh_plane(mesh, [0, 1, 0], [0, -570.0, 0])
             mesh.vertices -= self.scan_center
             mesh.vertices /= 1000.0
         else:
@@ -561,13 +422,13 @@ class Evaluation_EASY:
 
     def calculate_visual_similarity(self):
 
-        tgt_normal_arr = make_grid(torch.cat(self.tgt_imgs["normal"], dim=0), nrow=4)
-        tgt_render_arr = make_grid(torch.cat(self.tgt_imgs["render"], dim=0), nrow=4)
-        src_normal_arr = make_grid(torch.cat(self.src_imgs["normal"], dim=0), nrow=4)
-        src_render_arr = make_grid(torch.cat(self.src_imgs["render"], dim=0), nrow=4)
+        tgt_normal_arr = make_grid(torch.cat(self.tgt_imgs["normal"], dim=0), nrow=4, padding=0)
+        tgt_render_arr = make_grid(torch.cat(self.tgt_imgs["render"], dim=0), nrow=4, padding=0)
+        src_normal_arr = make_grid(torch.cat(self.src_imgs["normal"], dim=0), nrow=4, padding=0)
+        src_render_arr = make_grid(torch.cat(self.src_imgs["render"], dim=0), nrow=4, padding=0)
 
-        mask_arr = tgt_normal_arr[:, :, [-1]] * (tgt_normal_arr[:, :, [2]] > 0.5)
-        # plt.imsave(f"./tmp/{self.subject}_{self.outfit}_mask.jpg", mask_arr[:,:,0])
+        mask_arr = src_normal_arr[:, :, [-1]] * (src_normal_arr[:, :, [2]] > 0.5)
+        # plt.imsave(f"./tmp/{self.subject}_{self.outfit}_mask.jpg", mask_arr)
 
         metrics = {}
         metrics["Normal"] = (((((src_normal_arr[..., :3] - tgt_normal_arr[..., :3]) * mask_arr)**
@@ -611,7 +472,8 @@ class Evaluation_EASY:
             faces=[torch.tensor(self.recon.faces).long()]
         ).to(self.device)
 
-        tgt_points = Pointclouds(tgt_mesh.verts_packed().unsqueeze(0))
+        samples_tgt, _, _ = sample_points_from_meshes(tgt_mesh, 100000)
+        tgt_points = Pointclouds(samples_tgt)
         p2s_dist1 = point_mesh_distance(src_mesh, tgt_points)[0].sum() * 100.0
 
         samples_src, _, _ = sample_points_from_meshes(src_mesh, 100000)

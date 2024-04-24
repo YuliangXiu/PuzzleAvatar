@@ -14,7 +14,7 @@ python cores/main_mc.py \
  --exp_dir results/$1 \
  --sub_name $2 \
  --use_peft ${peft_type} \
- --use_shape_description \
+#  --use_shape_description \
 
 python utils/body_utils/postprocess_mc.py \
     --dir results/$1 \
@@ -27,4 +27,4 @@ python cores/main_mc.py \
  --exp_dir results/$1 \
  --sub_name $2 \
  --use_peft ${peft_type} \
- --use_shape_description \
+#  --use_shape_description \

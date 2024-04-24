@@ -119,6 +119,7 @@ def computePRT(mesh_path, scale, n, order):
     F = None
 
     if os.path.exists(bounce_path) and os.path.exists(face_path):
+    # if False:
 
         PRT = np.load(bounce_path)
         F = np.load(face_path)

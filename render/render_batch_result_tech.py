@@ -106,11 +106,11 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite):
         rndr.display()
 
         rgb_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech"), 'render',
+            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech_full"), 'render',
             f'{y:03d}.png'
         )
         norm_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech"), 'normal',
+            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech_full"), 'normal',
             f'{y:03d}.png'
         )
 

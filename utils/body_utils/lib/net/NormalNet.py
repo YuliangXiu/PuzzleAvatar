@@ -97,7 +97,7 @@ class NormalNet(BasePIFuNet):
         # output: float_arr [-1,1] with [B, C, H, W]
         mask = ((in_tensor["image"].abs().sum(dim=1, keepdim=True) != 0.0).detach().float())
 
-        return nmlF_normalized * mask, nmlB_normalized * mask
+        return torch.cat([nmlF_normalized, (mask*2.0)-1.0],dim=1), torch.cat([nmlB_normalized, (mask*2.0)-1.0],dim=1)
 
     def get_norm_error(self, prd_F, prd_B, tgt):
         """calculate normal loss

@@ -1,5 +1,5 @@
 import argparse
-
+import os
 import numpy as np
 import torch
 import trimesh
@@ -19,8 +19,10 @@ args = parser.parse_args()
 smplx_container = SMPLX()
 device = torch.device(f"cuda:{args.gpu}")
 
+smplx_paths = os.path.join("./data", "/".join(args.dir.split("/")[-4:]), "smplx_*.obj")
+
 # load smplx and TeCH objs
-smplx_path = glob(f"{args.dir.replace('results', 'data')}/smplx_*.obj")[0]
+smplx_path = glob(smplx_paths)[0]
 tech_path = f"{args.dir}/obj/{args.name}_geometry.obj"
 smplx_obj = trimesh.load(smplx_path, maintain_orders=True, process=False)
 tech_obj = trimesh.load(tech_path, maintain_orders=True, process=False)
@@ -46,3 +48,7 @@ smplx_hand.remove_unreferenced_vertices()
 tech_new = sum([tech_body, smplx_hand])
 tech_new_obj = poisson(tech_new, tech_path.replace("geometry", "geometry_final"), depth=10)
 mesh_simplify(tech_path.replace("geometry", "geometry_final"))
+
+# remove redundant objs
+os.remove(tech_path.replace("geometry.obj", "geometry_final_soups.ply"))
+os.remove(tech_path)

@@ -32,13 +32,15 @@ error_file = "./clusters/error.txt"
 #                             print(f"{line_path} wrong json")
 
 
-with open("./clusters/subjects_all.txt", "w") as f:
+with open("./clusters/subjects_test.txt", "w") as f:
     for subject in os.listdir(data_root):
-        for motion in os.listdir(os.path.join(data_root, subject)):
-            if motion not in ["apose", "full.jpg"]:
-                os.makedirs(os.path.join("./logs", subject, motion), exist_ok=True)
-                line_path = '/'.join(os.path.join(data_root, subject, motion).split('/')[2:])
-                line = f"{line_path.replace('fitting', 'puzzle_cam')} {subject} {motion}\n"
-                f.write(line)
+        motions = os.listdir(os.path.join(data_root, subject))
+        motions.remove("apose")
+        motions.remove("full.jpg")
+        for motion in np.random.choice(motions, 3, replace=False):
+            os.makedirs(os.path.join("./logs", subject, motion), exist_ok=True)
+            line_path = '/'.join(os.path.join(data_root, subject, motion).split('/')[2:])
+            line = f"{line_path.replace('fitting', 'puzzle_cam')} {subject} {motion}\n"
+            f.write(line)
 
                 

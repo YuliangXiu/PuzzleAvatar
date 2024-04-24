@@ -8,10 +8,6 @@ export SUBJECT_NAME=$3
 export BASE_MODEL=stabilityai/stable-diffusion-2-1-base
 export peft_type="none"
 
-# Step 0: Run DINO+SAM
-python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR} --overwrite
-python multi_concepts/islands_all.py --out_dir ${INPUT_DIR} --overwrite
-
 # Step 1: Run multi-concept DreamBooth training
 rm -rf ${EXP_DIR}/text_encoder
 rm -rf ${EXP_DIR}/unet
@@ -30,7 +26,7 @@ python multi_concepts/train.py \
   --initial_learning_rate 5e-4 \
   --learning_rate 2e-6 \
   --prior_loss_weight 1.0 \
-  --syn_loss_weight "2.0,2.0" \
+  --syn_loss_weight "2.0,0.0" \
   --mask_loss_weight 1.0 \
   --lambda_attention 1e-2 \
   --img_log_steps 1000 \
@@ -40,12 +36,12 @@ python multi_concepts/train.py \
   --boft_block_num=8 \
   --boft_block_size=0 \
   --boft_n_butterfly_factor=1 \
-  --lora_r=32 \
+  --lora_r=16 \
   --enable_xformers_memory_efficient_attention \
   --use_peft ${peft_type} \
   --wandb_mode "offline" \
-  # --use_shape_description \
   # --do_not_apply_masked_prior \
+  # --use_shape_description \
   # --no_prior_preservation \
 
 # Step 2: Run multi-concept DreamBooth inference
@@ -56,31 +52,4 @@ python multi_concepts/inference.py \
   --instance_dir ${INPUT_DIR} \
   --num_samples 10 \
   --use_peft ${peft_type} \
-  --use_shape_description \
-
-# Step 3: Run geometry stage (Run on a single GPU)
-rm -rf ${EXP_DIR}/geometry/checkpoints
-rm -rf ${EXP_DIR}/geometry/run
-rm -rf ${EXP_DIR}/geometry/validation
-rm -rf ${EXP_DIR}/geometry/visualize
-rm -rf ${EXP_DIR}/geometry/tet
-
-python cores/main_mc.py \
- --config configs/tech_mc_geometry.yaml \
- --exp_dir ${EXP_DIR} \
- --sub_name ${SUBJECT_NAME} \
- --use_peft ${peft_type} \
- --use_shape_description \
-
-python utils/body_utils/postprocess_mc.py \
-    --dir ${EXP_DIR} \
-    --name ${SUBJECT_NAME}
-
-# Step 4: Run texture stage (Run on a single GPU)
-rm -rf ${EXP_DIR}/texture
-python cores/main_mc.py \
- --config configs/tech_mc_texture.yaml \
- --exp_dir ${EXP_DIR} \
- --sub_name ${SUBJECT_NAME} \
- --use_peft ${peft_type} \
- --use_shape_description \
+  # --use_shape_description \

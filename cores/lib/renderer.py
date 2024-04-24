@@ -312,7 +312,9 @@ class Renderer(nn.Module):
         verts = torch.cat([self.mesh.v, torch.ones_like(self.mesh.v[:, :1])],
                           dim=1) @ self.resize_matrix_inv.T
         self.mesh.v = verts
-        self.mesh.write(os.path.join(save_path, '{}.obj'.format(name)))
+        
+        export_path = os.path.join(save_path, '{}.obj'.format(name))
+        self.mesh.write(export_path)
         
         if self.cfg.data.da_pose_mesh:
             import trimesh
@@ -711,6 +713,7 @@ class Renderer(nn.Module):
         results['image'] = color
         results['alpha'] = alpha
         results['bg_color'] = bg_color
+        
         if geo_reg_loss is not None:
             results['geo_reg_loss'] = geo_reg_loss
 
@@ -724,6 +727,7 @@ class Renderer(nn.Module):
             ) / 255
             # results['image'] = torch.flip(results['image'], dims=[-2])
             # results['openpose_map'] = torch.flip(results['openpose_map'], dims=[-2])
+            
         if return_can_pos_map:
             results['can_pos_map'] = self.get_can_pos_map(rast.detach(), rast_db.detach(), mesh.f)
             if self.cfg.model.render_ssaa > 1:

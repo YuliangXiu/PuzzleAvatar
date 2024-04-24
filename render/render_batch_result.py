@@ -22,7 +22,7 @@ numba.config.THREADING_LAYER = 'workqueue'
 sys.path.append(os.path.join(os.getcwd()))
 
 
-def render_subject(subject, save_folder, rotation, size, egl, overwrite):
+def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag):
 
     initialize_GL_context(width=size, height=size, egl=egl)
 
@@ -99,11 +99,17 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite):
 
         rndr.display()
 
+        idx = subject.split("/").index("PuzzleIOI")
+
         rgb_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[3:]), 'render', f'{y:03d}.png'
+            save_folder,
+            "/".join(subject.split("/")[idx + 1:]).replace("puzzle_cam", f"puzzle_cam_{tag}"),
+            'render', f'{y:03d}.png'
         )
         norm_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[3:]), 'normal', f'{y:03d}.png'
+            save_folder,
+            "/".join(subject.split("/")[idx + 1:]).replace("puzzle_cam", f"puzzle_cam_{tag}"),
+            'normal', f'{y:03d}.png'
         )
 
         if overwrite or (not os.path.exists(rgb_path)):
@@ -124,11 +130,15 @@ if __name__ == "__main__":
     parser.add_argument(
         '-debug', '--debug', action="store_true", help='debug mode, only render one subject'
     )
+    parser.add_argument('-tag', '--tag', type=str, help='tag name')
     parser.add_argument(
         '-headless', '--headless', action="store_true", help='headless rendering with EGL'
     )
     parser.add_argument(
         '-overwrite', '--overwrite', action="store_true", help='overwrite existing files'
+    )
+    parser.add_argument(
+        '-split', '--split', type=str, default="all", help='split the rendering into parts'
     )
     args = parser.parse_args()
 
@@ -156,8 +166,8 @@ if __name__ == "__main__":
     os.makedirs(current_out_dir, exist_ok=True)
     print(f"Output dir: {current_out_dir}")
 
-    subjects = np.loadtxt("clusters/subjects_all.txt", dtype=str, delimiter=" ")[:, 0]
-    subjects = [f"./results/{outfit}/" for outfit in subjects]
+    subjects = np.loadtxt(f"clusters/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:, 0]
+    subjects = [f"./results/{args.tag}/{outfit}/" for outfit in subjects]
     # subjects = [item for item in subjects if "03619" in item or "03633" in item]
 
     if args.debug:
@@ -175,6 +185,7 @@ if __name__ == "__main__":
                     size=args.size,
                     egl=args.headless,
                     overwrite=args.overwrite,
+                    tag=args.tag,
                 ),
                 subjects,
             ),
