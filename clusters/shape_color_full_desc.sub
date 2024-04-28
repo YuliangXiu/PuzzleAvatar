@@ -1,9 +1,9 @@
-executable = ./scripts/shape_color_full_nosyn_rgb.sh
+executable = ./scripts/shape_color_full_desc.sh
 arguments = $(dir) $(subject)_$(outfit)
 
-error = ./logs/$(subject)/$(outfit)/shape_color_full_nosyn_rgb.err
-output = ./logs/$(subject)/$(outfit)/shape_color_full_nosyn_rgb.out
-log = ./logs/$(subject)/$(outfit)/shape_color_full_nosyn_rgb.log
+error = ./logs/$(subject)/$(outfit)/shape_color_full_desc.err
+output = ./logs/$(subject)/$(outfit)/shape_color_full_desc.out
+log = ./logs/$(subject)/$(outfit)/shape_color_full_desc.log
 
 request_memory = 100000
 request_disk = 10G
@@ -13,4 +13,4 @@ requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && Uts
 
 max_materialize = 200
 
-queue dir,subject,outfit from ./clusters/lst/failed_sds_full_nosyn_rgb.txt
+queue dir,subject,outfit from ./clusters/lst/failed_sds_full_desc.txt

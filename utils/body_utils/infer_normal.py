@@ -42,6 +42,7 @@ if __name__ == "__main__":
     parser.add_argument("-tag", "--tag", type=str, default="full")
     parser.add_argument("-method", "--method", type=str, default="puzzle_cam")
     parser.add_argument("-split", "--split", type=str, default="test")
+    parser.add_argument("-overwrite", "--overwrite", action="store_true", help="overwrite existing files")
     args = parser.parse_args()
 
     device = torch.device("cuda:0")
@@ -67,7 +68,7 @@ if __name__ == "__main__":
     )
 
     subjects_outfits = np.loadtxt(
-        f"./clusters/subjects_{args.split}.txt", dtype=str, delimiter=" "
+        f"./clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" "
     )[:, 1:]
     subfolders = [
         f"./data/PuzzleIOI_4views/{args.method}_{args.tag}/{subject}/{outfit}"
@@ -94,7 +95,7 @@ if __name__ == "__main__":
 
             out_normal_F_path = f"{subfolder}/normal_est/{os.path.basename(rgb_file)}"
             
-            if not os.path.exists(out_normal_F_path):
+            if not os.path.exists(out_normal_F_path) or args.overwrite:
             
                 os.makedirs(os.path.dirname(out_normal_F_path), exist_ok=True)
 

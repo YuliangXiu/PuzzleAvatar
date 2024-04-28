@@ -207,7 +207,7 @@ class DreamBoothDataset(Dataset):
 
         # formulate the prompt and prompt_raw
         if is_face:
-            prompt_head = f"a high-resolution DSLR colored image of the face of a {self.gender}"
+            prompt_head = f"a high-resolution DSLR colored image of the headshot of a {self.gender}"
         else:
             prompt_head = f"a high-resolution DSLR colored image of a {self.gender}"
 

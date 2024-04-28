@@ -353,7 +353,7 @@ class Trainer(object):
 
             if self.cfg.train.face_sample_ratio > 0.:
                 self.face_text_z_novd = self.guidance.get_text_embeds([
-                    f"the face of {self.cfg.guidance.text_head}, {self.cfg.guidance.text_extra}"
+                    f"the headshot of {self.cfg.guidance.text_head}, {self.cfg.guidance.text_extra}"
                 ], [self.cfg.guidance.negative])
                 self.face_text_z = []
                 prompt = self.cfg.guidance.text_head if (
@@ -361,7 +361,7 @@ class Trainer(object):
                 ) and (len(self.cfg.guidance.text_head) > 0) else self.cfg.guidance.text
                 for d in ['front', 'side', 'back', 'side', 'overhead', 'bottom']:
                     # construct dir-encoded text
-                    text = f"the face of {prompt}, {d} view, {self.cfg.guidance.text_extra}"
+                    text = f"the headshot of {prompt}, {d} view, {self.cfg.guidance.text_extra}"
 
                     negative_text = f"{self.cfg.guidance.negative_normal}"
 
@@ -394,12 +394,12 @@ class Trainer(object):
                 ) and (len(self.cfg.guidance.text_head) > 0) else basic_prompt
 
                 self.face_normal_text_z_novd = self.guidance.get_text_embeds([
-                    f"{self.cfg.guidance.normal_text} of the face of {basic_prompt}, {self.cfg.guidance.normal_text_extra}"
+                    f"{self.cfg.guidance.normal_text} of the headshot of {basic_prompt}, {self.cfg.guidance.normal_text_extra}"
                 ], [self.cfg.guidance.negative_normal])
                 self.face_normal_text_z = []
                 for d in ['front', 'side', 'back', 'side', 'overhead', 'bottom']:
                     # construct dir-encoded text
-                    text = f"{self.cfg.guidance.normal_text} of the face of {basic_prompt}, {d} view, {self.cfg.guidance.normal_text_extra}"
+                    text = f"{self.cfg.guidance.normal_text} of the headshot of {basic_prompt}, {d} view, {self.cfg.guidance.normal_text_extra}"
 
                     negative_text = f"{self.cfg.guidance.negative_normal}"
 
@@ -424,12 +424,12 @@ class Trainer(object):
                     self.textureless_text_z.append(text_z)
 
                 self.face_textureless_text_z_novd = self.guidance.get_text_embeds([
-                    f"{self.cfg.guidance.textureless_text} of the face of {self.cfg.guidance.text_head}, {self.cfg.guidance.textureless_text_extra}"
+                    f"{self.cfg.guidance.textureless_text} of the headshot of {self.cfg.guidance.text_head}, {self.cfg.guidance.textureless_text_extra}"
                 ], [self.cfg.guidance.negative_textureless])
                 self.face_textureless_text_z = []
                 for d in ['front', 'side', 'back', 'side', 'overhead', 'bottom']:
                     # construct dir-encoded text
-                    text = f"{self.cfg.guidance.textureless_text} of the face of {self.cfg.guidance.text_head}, {d} view, {self.cfg.guidance.textureless_text_extra}"
+                    text = f"{self.cfg.guidance.textureless_text} of the headshot of {self.cfg.guidance.text_head}, {d} view, {self.cfg.guidance.textureless_text_extra}"
 
                     negative_text = f"{self.cfg.guidance.negative_textureless}"
 

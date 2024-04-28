@@ -9,9 +9,12 @@ if __name__ == "__main__":
     parser.add_argument(
         '-tag', '--tag', type=str, default="lora", help='tag name'
     )
+    parser.add_argument(
+        '-split', '--split', type=str, default="test", help='split name'
+    )
     args = parser.parse_args()
 
-    subjects = np.loadtxt("./clusters/subjects_test.txt", dtype=str, delimiter=" ")[:, 0]
+    subjects = np.loadtxt(f"./clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:, 0]
     subjects = [f"./results/{args.tag}/{outfit}/" for outfit in subjects]
 
     failed_sd = []
@@ -43,8 +46,8 @@ if __name__ == "__main__":
     print("Failed SDS: ", len(failed_sds))
 
 
-    lst_to_file(failed_sd, f"./clusters/failed_sd_{args.tag}.txt")
-    lst_to_file(failed_sds, f"./clusters/failed_sds_{args.tag}.txt")
+    lst_to_file(failed_sd, f"./clusters/lst/failed_sd_{args.tag}.txt")
+    lst_to_file(failed_sds, f"./clusters/lst/failed_sds_{args.tag}.txt")
             
 
 

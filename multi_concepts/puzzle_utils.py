@@ -4,6 +4,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 import pyrender
+import torchvision
 from torchvision.utils import make_grid
 from glob import glob
 
@@ -386,14 +387,29 @@ class Evaluation_EASY:
         # tex data
         self.src_imgs = {}
         self.tgt_imgs = {}
-        for mode in ["normal", "render"]:
-            self.src_imgs[mode] = [
-                torch.as_tensor(plt.imread(img_file))
-                for img_file in glob(f"{self.render_gt_dir}/{mode}/*.png")
-            ]
+        self.bottomline = []
+
+        for mode in ["body", "normal", "render"]:
+
             self.tgt_imgs[mode] = [
                 torch.as_tensor(plt.imread(img_file))
-                for img_file in glob(f"{self.render_recon_dir}/{mode}/*.png")
+                for img_file in sorted(glob(f"{self.render_gt_dir}/{mode}/*.png"))
+            ]
+
+            if mode == "body":
+                self.bottomline = [
+                    torch.where(normal_body_img[..., -1] > 0)[0].max().item()
+                    for normal_body_img in self.tgt_imgs[mode]
+                ]
+            else:
+                for idx, scan_img in enumerate(self.tgt_imgs[mode]):
+                    scan_img[self.bottomline[idx]:, :, -1] *= 0
+                    self.tgt_imgs[mode][idx] = scan_img
+
+        for mode in ["normal", "render", "normal_est"]:
+            self.src_imgs[mode] = [
+                torch.as_tensor(plt.imread(img_file))
+                for img_file in sorted(glob(f"{self.render_recon_dir}/{mode}/*.png"))
             ]
 
     def load_mesh(self, mesh_file, is_scan=False):
@@ -422,17 +438,43 @@ class Evaluation_EASY:
 
     def calculate_visual_similarity(self):
 
-        tgt_normal_arr = make_grid(torch.cat(self.tgt_imgs["normal"], dim=0), nrow=4, padding=0)
-        tgt_render_arr = make_grid(torch.cat(self.tgt_imgs["render"], dim=0), nrow=4, padding=0)
-        src_normal_arr = make_grid(torch.cat(self.src_imgs["normal"], dim=0), nrow=4, padding=0)
-        src_render_arr = make_grid(torch.cat(self.src_imgs["render"], dim=0), nrow=4, padding=0)
+        tgt_normal_arr = make_grid(torch.cat(self.tgt_imgs["normal"], dim=0), nrow=1, padding=0)
+        tgt_render_arr = make_grid(torch.cat(self.tgt_imgs["render"], dim=0), nrow=1, padding=0)
 
-        mask_arr = src_normal_arr[:, :, [-1]] * (src_normal_arr[:, :, [2]] > 0.5)
-        # plt.imsave(f"./tmp/{self.subject}_{self.outfit}_mask.jpg", mask_arr)
+        src_normal_arr = make_grid(torch.cat(self.src_imgs["normal"], dim=0), nrow=1, padding=0)
+        src_render_arr = make_grid(torch.cat(self.src_imgs["render"], dim=0), nrow=1, padding=0)
+        src_normal_est_arr = make_grid(
+            torch.cat(self.src_imgs["normal_est"], dim=0), nrow=1, padding=0
+        )
+
+        # take all the valid pixels of ground truth normal
+        # mask_arr = tgt_normal_arr[:, :, [-1]] * (tgt_normal_arr[:, :, [2]] > 0.5)
+        mask_arr = tgt_normal_arr[:, :, [-1]]
+
+        # take all the valid pixels of estimated normal
+        mask_est_arr = src_normal_arr[:, :, [-1]] * src_normal_est_arr[:, :, [-1]]
+
+        # torchvision.utils.save_image(
+        #     mask_arr.permute(2, 0, 1), f"./tmp/{self.subject}_{self.outfit}_mask.png"
+        # )
+        # torchvision.utils.save_image(
+        #     mask_est_arr.permute(2, 0, 1), f"./tmp/{self.subject}_{self.outfit}_mask_est.png"
+        # )
+        # torchvision.utils.save_image(
+        #     tgt_normal_arr.permute(2, 0, 1), f"./tmp/{self.subject}_{self.outfit}_normal.png"
+        # )
+        # torchvision.utils.save_image(
+        #     tgt_render_arr.permute(2, 0, 1), f"./tmp/{self.subject}_{self.outfit}_render.png"
+        # )
+        # import sys
+        # sys.exit(0)
 
         metrics = {}
         metrics["Normal"] = (((((src_normal_arr[..., :3] - tgt_normal_arr[..., :3]) * mask_arr)**
                                2).sum(dim=2).mean()) * 4.0).item()
+
+        metrics["Consist"] = (((((src_normal_arr[..., :3] - src_normal_est_arr[..., :3]) *
+                                 mask_est_arr)**2).sum(dim=2).mean()) * 4.0).item()
 
         render_dict = {
             "scan_color": tgt_render_arr[..., :3] * mask_arr,

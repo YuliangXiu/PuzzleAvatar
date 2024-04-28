@@ -40,7 +40,7 @@ python multi_concepts/train.py \
   --enable_xformers_memory_efficient_attention \
   --use_peft ${peft_type} \
   --wandb_mode "offline" \
-  # --do_not_apply_masked_prior \
+  --do_not_apply_masked_prior \
   # --use_shape_description \
   # --no_prior_preservation \
 

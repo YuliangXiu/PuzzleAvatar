@@ -31,7 +31,6 @@ python multi_concepts/train.py \
   --lambda_attention 1e-2 \
   --img_log_steps 1000 \
   --checkpointing_steps 1000 \
-  --use_view_prompt \
   --log_checkpoints \
   --boft_block_num=8 \
   --boft_block_size=0 \
@@ -40,7 +39,8 @@ python multi_concepts/train.py \
   --enable_xformers_memory_efficient_attention \
   --use_peft ${peft_type} \
   --wandb_mode "offline" \
-  # --do_not_apply_masked_prior \
+  --do_not_apply_masked_prior \
+  # --use_view_prompt \
   # --use_shape_description \
   # --no_prior_preservation \
 

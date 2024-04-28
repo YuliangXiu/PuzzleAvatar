@@ -9,8 +9,8 @@ request_memory = 100000
 request_disk = 10G
 request_cpus = 10
 request_gpus = 1
-requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g164" && UtsnameNodename =!= "g093" && UtsnameNodename =!= "i107" && TARGET.CUDAGlobalMemoryMb > 35000)
+requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g164" && UtsnameNodename =!= "g093" && UtsnameNodename =!= "i104" && TARGET.CUDAGlobalMemoryMb > 35000)
 
 max_materialize = 200
 
-queue dir,subject,outfit from ./clusters/subjects_test.txt
+queue dir,subject,outfit from ./clusters/lst/failed_sds_full_nosyn_norm.txt

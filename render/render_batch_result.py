@@ -33,7 +33,7 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag):
         mesh_file = glob(f"{subject}/obj/*texture.obj")[0]
         tex_file = glob(f"{subject}/obj/*albedo.png")[0]
     except:
-        with open("./clusters/error_eval.txt", "a") as f:
+        with open("./clusters/lst/error_eval.txt", "a") as f:
             head = "/".join(subject.split("/")[2:-1])
             f.write(f"{head} {' '.join(head.split('/')[-2:])}\n")
 
@@ -166,7 +166,7 @@ if __name__ == "__main__":
     os.makedirs(current_out_dir, exist_ok=True)
     print(f"Output dir: {current_out_dir}")
 
-    subjects = np.loadtxt(f"clusters/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:, 0]
+    subjects = np.loadtxt(f"clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:, 0]
     subjects = [f"./results/{args.tag}/{outfit}/" for outfit in subjects]
     # subjects = [item for item in subjects if "03619" in item or "03633" in item]
 

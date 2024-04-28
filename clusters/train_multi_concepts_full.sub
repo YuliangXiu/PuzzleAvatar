@@ -1,0 +1,16 @@
+executable = ./scripts/train_multi_concepts_full.sh
+arguments = data/$(dir) results/full/$(dir) $(subject)_$(outfit)
+
+error = ./logs/$(subject)/$(outfit)/train_multi_concepts_full.err
+output = ./logs/$(subject)/$(outfit)/train_multi_concepts_full.out
+log = ./logs/$(subject)/$(outfit)/train_multi_concepts_full.log
+
+request_memory = 100000
+request_disk = 5G
+request_cpus = 20
+request_gpus = 1
+requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g164" && UtsnameNodename =!= "g093" && UtsnameNodename =!= "i104" && TARGET.CUDAGlobalMemoryMb > 35000)
+
+max_materialize = 300
+
+queue dir,subject,outfit from ./clusters/lst/failed_sd_full.txt

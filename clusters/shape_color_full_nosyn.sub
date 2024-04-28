@@ -13,4 +13,4 @@ requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && Uts
 
 max_materialize = 200
 
-queue dir,subject,outfit from ./clusters/failed_sds_full_nosyn.txt
+queue dir,subject,outfit from ./clusters/lst/failed_sds_full_nosyn.txt

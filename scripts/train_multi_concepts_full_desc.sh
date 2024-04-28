@@ -41,7 +41,7 @@ python multi_concepts/train.py \
   --use_peft ${peft_type} \
   --wandb_mode "offline" \
   --do_not_apply_masked_prior \
-  # --use_shape_description \
+  --use_shape_description \
   # --no_prior_preservation \
 
 # Step 2: Run multi-concept DreamBooth inference
@@ -52,4 +52,4 @@ python multi_concepts/inference.py \
   --instance_dir ${INPUT_DIR} \
   --num_samples 10 \
   --use_peft ${peft_type} \
-  # --use_shape_description \
+  --use_shape_description \

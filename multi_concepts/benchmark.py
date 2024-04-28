@@ -29,7 +29,7 @@ def run(subject_outfit, evaluator, name):
         results[subject][outfit].update(evaluator.calculate_visual_similarity())
     else:
         print(f"Missing {subject_outfit}")
-        with open(f"./clusters/error_eval_{name}.txt", "a") as f:
+        with open(f"./clusters/lst/error_eval_{name}.txt", "a") as f:
             head = f"PuzzleIOI/{name}/{subject}/{outfit}"
             f.write(f"{head} {subject} {outfit}\n")
 
@@ -65,18 +65,21 @@ if __name__ == "__main__":
     data_root = "./data/PuzzleIOI/fitting"
     result_geo_root = f"./results/{args.tag}/PuzzleIOI/{args.name}"
     result_img_root = "./data/PuzzleIOI_4views"
-    results_path = f"./results/full/PuzzleIOI/results_{args.name}_{args.tag}.npy"
+    
+    results_path = f"./results/full/PuzzleIOI/results_{args.name}_{args.tag}_{args.split}.npy"
+    results_all_path = f"./results/full/PuzzleIOI/results_{args.name}_{args.tag}_all.npy"
 
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     os.environ['OPENBLAS_NUM_THREADS'] = f"{mp.cpu_count()}"
 
     # all_outfits = glob(f"{data_root}/*/outfit*/")
 
-    all_outfits = np.loadtxt(f"clusters/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:, 0]
+    all_outfits = np.loadtxt(f"clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:,
+                                                                                                  0]
     all_outfits = [f"./data/{outfit}/" for outfit in all_outfits]
 
     # overwrite the results.npy file
-    if (not os.path.exists(results_path)) or args.overwrite:
+    if (not os.path.exists(results_path)) or args.overwrite or (not os.path.exists(results_all_path)):
 
         if os.path.exists(results_path):
             os.remove(results_path)
@@ -122,13 +125,18 @@ if __name__ == "__main__":
             results = to_dict(globalDict)
             np.save(results_path, results, allow_pickle=True)
 
-    results = np.load(results_path, allow_pickle=True).item()
+    if os.path.exists(results_path):
+        results = np.load(results_path, allow_pickle=True).item()
+    elif os.path.exists(results_all_path):
+        results = np.load(results_all_path, allow_pickle=True).item()
 
     test_subject_outfits = np.loadtxt(
-        f"clusters/subjects_{args.split}.txt", dtype=str, delimiter=" "
+        f"clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" "
     )[:, 1:]
 
-    total_metrics = {"Chamfer": [], "P2S": [], "Normal": [], "PSNR": [], "SSIM": [], "LPIPS": []}
+    total_metrics = {
+        "Chamfer": [], "P2S": [], "Normal": [], "Consist": [], "PSNR": [], "SSIM": [], "LPIPS": []
+    }
 
     for subject, outfit in tqdm(test_subject_outfits):
         if sorted(total_metrics.keys()) == sorted(results[subject][outfit].keys()):
