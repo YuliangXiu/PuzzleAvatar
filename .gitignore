@@ -1,3 +1,4 @@
+test_mv_range/*
 data/**
 thirdparties/**.pth
 results/
