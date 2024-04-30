@@ -1,3 +1,6 @@
+data/**
+thirdparties/**.pth
+results/
 output/
 outputs/
 thirdparties/*

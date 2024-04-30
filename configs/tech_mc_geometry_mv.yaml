@@ -1,0 +1,51 @@
+exp_root: null
+stage: geometry
+model:
+    use_dmtet_network: True
+    tet_offset_scale: 0.
+    tet_grid_volume: 5e-8
+    tet_num_subdiv: 0
+    render_ssaa: 4
+    geo_hash_max_res: 1024
+    albedo_res: 2048
+
+train:
+    lr: 0.0001
+    h: 512
+    w: 512
+    iters: 5000
+    tet_subdiv_steps: [6000]
+    use_lap_loss: True
+    normal_sample_ratio: 1.0
+    radius_range: [0.5, 1.3] # [1.4, 1.5]  
+    height_range: [-0.4, 0.4]  # [0, 0]
+    theta_range: [45, 90]  # [0, 45]
+    phi_diff: 30
+    jitter_pose: False
+    face_sample_ratio: 0.5
+    face_height_range: [0., 0.]
+    face_radius_range: [0.3, 0.4]
+    face_phi_diff: 30
+    face_theta_range: [60, 120]
+    face_phi_range: [-90, 90]
+    render_relative_normal: True
+    lambda_lap: 1e5
+    lambda_eik: 0.
+    lambda_sil: 0.
+    lambda_normal: 0.
+    lambda_recon: 0.
+    lambda_color_chamfer: 0.
+    decay_lnorm_cosine_cycle: 5000
+    decay_lnorm_cosine_max_iter: 10000
+    
+data:
+    load_input_image: False
+    load_front_normal: False
+    load_back_normal: False
+    
+guidance:
+    sd_version: mv
+    normal_text: "a detailed sculpture"
+    use_view_prompt: True
+    guidance_scale: 7.5
+    step_range: [0.02, 0.25]

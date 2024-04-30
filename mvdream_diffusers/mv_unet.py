@@ -59,10 +59,12 @@ def get_camera(
     angle_gap = azimuth_span / num_frames
     cameras = []
     for azimuth in np.arange(azimuth_start, azimuth_span + azimuth_start, angle_gap):
+        # azimuth -= 90
         pose = orbit_camera(
             -elevation, azimuth, radius=1
         )  # kiui's elevation is negated, [4, 4]
-
+        # print(azimuth)
+        # 90 degree is front! 0 is side view 
         # opengl to blender
         if blender_coord:
             pose[2] *= -1
@@ -74,6 +76,32 @@ def get_camera(
         cameras.append(np.zeros_like(cameras[0]))
 
     return torch.from_numpy(np.stack(cameras, axis=0)).float()  # [num_frames, 16]
+
+
+def get_camera_condition(az, ele, radius, blender_coord=True):
+    """
+
+    :param az: (F, )
+    :param ele: (F, )
+    :param radius: _description_
+    :param blender_coord: _description_, defaults to True
+    :return: (F, 4, 4)
+    """
+    device = az.device
+    az_deg = az * 180 / np.pi
+    ele_deg = ele * 180 / np.pi
+    # print(az.shape, ele.shape, radius.shape)
+
+    pose_list = []
+    for f in range(len(az_deg)):
+        pose = orbit_camera(-ele_deg[f].cpu().detach().numpy(), az_deg[f].cpu().detach().numpy(), radius[f].item())
+        if blender_coord:
+            pose[2] *= -1
+            pose[[1, 2]] = pose[[2, 1]]
+        pose_list.append(pose.flatten())
+
+    pose = torch.from_numpy(np.stack(pose_list, axis=0)).float().to(device)  # [num_frames, 16]
+    return pose
 
 
 def timestep_embedding(timesteps, dim, max_period=10000, repeat_only=False):
@@ -1535,6 +1563,8 @@ class MultiViewUNetModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin, P
         :param num_frames: a integer indicating number of frames for tensor reshaping.
         :return: an [(N x F) x C x ...] Tensor of outputs. F is the number of frames (views).
         """
+        # take in cameras too! 
+        # print(x.shape, timesteps.shape, context.shape, camera.shape, num_frames)
         assert (
             x.shape[0] % num_frames == 0
         ), "input batch size must be dividable by num_frames!"

@@ -447,8 +447,11 @@ class MVDreamPipeline(DiffusionPipeline):
         callback_steps: int = 1,
         num_frames: int = 4,
         device=torch.device("cuda:0"),
+        camera=None,
+        text_embedding=None,
+        latents=None,
+
     ):
-        self.unet = self.unet.to(device=device)
         self.vae = self.vae.to(device=device)
         self.text_encoder = self.text_encoder.to(device=device)
 
@@ -467,14 +470,18 @@ class MVDreamPipeline(DiffusionPipeline):
             self.image_encoder = self.image_encoder.to(device=device)
             image_embeds_neg, image_embeds_pos = self.encode_image(image, device, num_images_per_prompt)
             image_latents_neg, image_latents_pos = self.encode_image_latents(image, device, num_images_per_prompt)
-            
-        _prompt_embeds = self._encode_prompt(
-            prompt=prompt,
-            device=device,
-            num_images_per_prompt=num_images_per_prompt,
-            do_classifier_free_guidance=do_classifier_free_guidance,
-            negative_prompt=negative_prompt,
-        )  # type: ignore
+        
+        if text_embedding is not None:
+            _prompt_embeds = text_embedding
+            print('use their prompt')
+        else:
+            _prompt_embeds = self._encode_prompt(
+                prompt=prompt,
+                device=device,
+                num_images_per_prompt=num_images_per_prompt,
+                do_classifier_free_guidance=do_classifier_free_guidance,
+                negative_prompt=negative_prompt,
+            )  # type: ignore
         prompt_embeds_neg, prompt_embeds_pos = _prompt_embeds.chunk(2)
 
         # Prepare latent variables
@@ -488,14 +495,15 @@ class MVDreamPipeline(DiffusionPipeline):
             prompt_embeds_pos.dtype,
             device,
             generator,
-            None,
+            latents=latents,
         )
-
+        latents_inp = latents.clone()
         # Get camera
         if num_frames == 1:
             camera = None
         else:
-            camera = get_camera(num_frames, elevation=elevation, extra_view=(image is not None)).to(dtype=latents.dtype, device=device)
+            if camera is None:
+                camera = get_camera(num_frames, elevation=elevation, extra_view=(image is not None)).to(dtype=latents.dtype, device=device)
             camera = camera.repeat_interleave(num_images_per_prompt, dim=0)
 
         # Prepare extra step kwargs.
@@ -507,8 +515,8 @@ class MVDreamPipeline(DiffusionPipeline):
             for i, t in enumerate(timesteps):
                 # expand the latents if we are doing classifier free guidance
                 multiplier = 2 if do_classifier_free_guidance else 1
-                latent_model_input = torch.cat([latents] * multiplier)
-                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                latent_model_input2 = torch.cat([latents] * multiplier)
+                latent_model_input = self.scheduler.scale_model_input(latent_model_input2, t)
 
                 unet_inputs = {
                     'x': latent_model_input,
@@ -518,7 +526,6 @@ class MVDreamPipeline(DiffusionPipeline):
                     'camera': torch.cat([camera] * multiplier) if camera is not None else None,
                 }
                 # print(unet_inputs['num_frames'], 'camera is None? ', camera is None)
-
 
                 if image is not None:
                     unet_inputs['ip'] = torch.cat([image_embeds_neg] * actual_num_frames + [image_embeds_pos] * actual_num_frames)
@@ -546,6 +553,12 @@ class MVDreamPipeline(DiffusionPipeline):
                     progress_bar.update()
                     if callback is not None and i % callback_steps == 0:
                         callback(i, t, latents)  # type: ignore
+
+            # camera_list = unet_inputs['camera'].reshape(-1, 4, 4)
+            # import pickle 
+            # with open("camera_list_mv_pipeline.pkl", "wb") as f:
+            #     pickle.dump(camera_list, f)
+            #     print('write to camera_list_mv_pipeline.pkl')
 
         # Post-processing
         if output_type == "latent":

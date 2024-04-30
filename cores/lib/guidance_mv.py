@@ -1,5 +1,3 @@
-import os.path as osp
-from jutils import image_utils
 from diffusers import (
     ControlNetModel, DDIMScheduler, PNDMScheduler, UNet2DConditionModel, DiffusionPipeline
 )
@@ -78,8 +76,6 @@ class StableDiffusion(nn.Module):
             print(f'[INFO] using hugging face custom model key: {hf_key}')
             model_key = hf_key
 
-        self.mv_mode = False
-        # import pdb; pdb.set_trace()
         if self.sd_version == '2-1':
             self.base_model_key = os.environ.get(
                 'BASE_MODEL', "stabilityai/stable-diffusion-2-1-base"
@@ -90,14 +86,11 @@ class StableDiffusion(nn.Module):
             self.base_model_key = "runwayml/stable-diffusion-v1-5"
         elif self.sd_version == 'mv':
             self.base_model_key = cfg.pretrain
-            self.mv_mode = True
         else:
             raise ValueError(f'Stable-diffusion version {self.sd_version} not supported.')
 
-        if 'base' in self.base_model_key:
+        if 'base' in self.base_model_key or 'mv' == self.sd_version:
             self.res = 512
-        elif self.mv_mode:
-            self.res = 256
         else:
             self.res = 768
 
@@ -136,7 +129,6 @@ class StableDiffusion(nn.Module):
                 requires_safety_checker=False,
                 trust_remote_code=True,
             ).to(self.device)
-            self.pipe = pipe
 
             self.text_encoder = pipe.text_encoder
             self.unet = pipe.unet
@@ -248,10 +240,9 @@ class StableDiffusion(nn.Module):
         is_face=False,
         cur_epoch=0,
         stage="geometry",
-        camera=None,
-        debug=False,
         **kwargs
     ):
+
         if is_face:
             unet = self.unet_head
         else:
@@ -265,18 +256,15 @@ class StableDiffusion(nn.Module):
         t = torch.randint(
             self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device
         )
-        # print(t)
 
         # encode image into latents with vae, requires grad!
-        # pred_img = F.interpolate(pred_rgb, (self.res, self.res), mode='bicubic', align_corners=True)
-        pred_img = F.adaptive_avg_pool2d(pred_rgb, self.res)
+        pred_img = F.interpolate(pred_rgb, (self.res, self.res), mode='bicubic', align_corners=True)
 
         latents = self.encode_imgs(pred_img)
 
         # predict the noise residual with unet, NO grad!
         with torch.no_grad():
             # add noise
-            # print('add noise', latents.shape)
             noise = torch.randn_like(latents)
             latents_noisy = self.scheduler.add_noise(latents, noise, t)
             # pred noise
@@ -299,16 +287,14 @@ class StableDiffusion(nn.Module):
                     mid_block_additional_residual=mid_block_res_sample,
                 ).sample
             else:
-                # print('nohint', latent_model_input.shape, t.shape, text_embeddings.shape)
-                if self.mv_mode:
-                    noise_pred = self.forward_mv_unet(
-                        latent_model_input, t, encoder_hidden_states=text_embeddings,
-                        camera=camera,
-                    )
-                else:
-                    noise_pred = unet(
-                        latent_model_input, t, encoder_hidden_states=text_embeddings,
-                    ).sample
+                print('nohint')
+                
+                noise_pred = unet(
+                    latent_model_input, t, encoder_hidden_states=text_embeddings,
+
+                )
+                if hasattr(noise_pred, 'sample'):
+                    noise_pred = noise_pred.sample
 
         # perform guidance (high scale from paper!)
         if self.scheduler.config.prediction_type == "v_prediction":
@@ -357,42 +343,7 @@ class StableDiffusion(nn.Module):
         # since we omitted an item in grad, we need to use the custom function to specify the gradient
         loss = SpecifyGradient.apply(latents, grad)
 
-        rtn_extra = {}
-        if debug:
-            with torch.no_grad():
-                # debug to save signal
-                # if eval_guidance:
-                # print('debug', noise_pred.shape, latents.shape)
-                self.scheduler.set_timesteps(self.num_train_timesteps)
-                latents = self.scheduler.step(noise_pred_text, t, latents)['pred_original_sample']
-                imgs = self.decode_latents(latents)
-                rtn_extra['1-step'] = imgs
-                rtn_extra['orig'] = pred_img
-                # num_inference_steps = 20
-                
-                # self.scheduler.set_timesteps(num_inference_steps)
-                # for i, t in enumerate(self.scheduler.timesteps):
-                #     # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
-                #     # predict the noise residual
-                #     with torch.no_grad():
-                #         noise_pred = self.forward_mv_unet(
-                #             latent_model_input, t, encoder_hidden_states=text_embeddings,
-                #             camera=camera,
-                #         )
-
-                #     # perform guidance
-                #     # noise_pred_null, noise_pred_text = noise_pred.chunk(2)
-                #     noise_pred_neg, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
-
-                #     noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
-
-                #     # compute the previous noisy sample x_t -> x_t-1
-                #     latent_model_input = self.scheduler.step(noise_pred, t, latents)['prev_sample']
-                # imgs_multi = self.decode_latents(latent_model_input)
-                # rtn_extra['multi-step'] = imgs_multi
-                # print(imgs_multi.shape, rtn_extra['1-step'].shape, rtn_extra['orig'].shape)
-
-        return loss, rtn_extra
+        return loss
 
     def produce_latents(
         self,
@@ -401,8 +352,7 @@ class StableDiffusion(nn.Module):
         width=512,
         num_inference_steps=50,
         guidance_scale=7.5,
-        latents=None,
-        camera=None,
+        latents=None
     ):
 
         if latents is None:
@@ -420,23 +370,14 @@ class StableDiffusion(nn.Module):
 
                 # predict the noise residual
                 with torch.no_grad():
-                    if self.mv_mode:
-                        # timestep = t.expand(latent_model_input.shape[0])
-                        # print(latent_model_input.shape, t.shape, timestep.shape, text_embeddings.shape, camera.shape)
-                        noise_pred = self.forward_mv_unet(
-                            latent_model_input, t, text_embeddings,
-                            camera=camera,
-                        )
-                        # print(noise_pred.shape)
-                    else:
-                        noise_pred = self.unet(
-                            latent_model_input, t, encoder_hidden_states=text_embeddings
-                        )['sample']
+                    noise_pred = self.unet(
+                        latent_model_input, t, encoder_hidden_states=text_embeddings
+                    )['sample']
 
                 # perform guidance
                 noise_pred_null, noise_pred_text = noise_pred.chunk(2)
                 noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
-                # print('noise_pred', noise_pred.shape, latents.shape)
+
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents)['prev_sample']
 
@@ -471,8 +412,7 @@ class StableDiffusion(nn.Module):
         width=512,
         num_inference_steps=50,
         guidance_scale=7.5,
-        latents=None,
-        camera=None,
+        latents=None
     ):
 
         if isinstance(prompts, str):
@@ -483,10 +423,7 @@ class StableDiffusion(nn.Module):
 
         # Prompts -> text embeds
         text_embeds = self.get_text_embeds(prompts, negative_prompts)    # [2, 77, 768]
-        # text_embeddings = torch.cat([negative_embeddings, text_embeddings, uncond_embeddings])
-        text_embeds = torch.stack([text_embeds[2], text_embeds[1]], 0) # (2, 77, 768)
-        text_embeds = text_embeds.unsqueeze(1).repeat(1, 4, 1, 1).reshape(-1, *text_embeds.shape[1:]) # (8, 77, 768)
-        latents_orig = latents.clone() if latents is not None else None
+
         # Text embeds -> img latents
         latents = self.produce_latents(
             text_embeds,
@@ -494,20 +431,17 @@ class StableDiffusion(nn.Module):
             width=width,
             latents=latents,
             num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            camera=camera
+            guidance_scale=guidance_scale
         )    # [1, 4, 64, 64]
-        # print('produce latents', latents.shape)
 
         # Img latents -> imgs
         imgs = self.decode_latents(latents)    # [1, 3, 512, 512]
-        img_pt = imgs
 
         # Img to Numpy
         imgs = imgs.detach().cpu().permute(0, 2, 3, 1).numpy()
         imgs = (imgs * 255).round().astype('uint8')
 
-        return imgs, img_pt, {'text_embeds': text_embeds, 'latents': latents_orig}
+        return imgs
 
     def controlnet_hint_conversion(self, controlnet_hint, height, width, num_images_per_prompt=1):
         channels = 3
@@ -573,59 +507,6 @@ class StableDiffusion(nn.Module):
                 f"Acceptable type of `controlnet_hint` are any of torch.Tensor, np.ndarray, PIL.Image.Image but is {type(controlnet_hint)}"
             )
 
-    def forward_mv_unet(self, latents, t, encoder_hidden_states, camera, get_inp=False):
-        """interface, hijack multiple frames.
-
-        :param latents: (BF, C, H, W)
-        :param t: (1, )
-        :param encoder_hidden_states: (BF, L, D)
-        :param camera: (F, 16)
-        """
-        #  torch.Size([12, 4, 32, 32]) torch.Size([1]) torch.Size([12, 77, 1024]) torch.Size([4, 16])
-        # print('forward_mv_unet', latents.shape, t.shape, encoder_hidden_states.shape, camera.shape)
-        device = latents.device
-        # expand all inputs to have batch BF
-        BF = encoder_hidden_states.shape[0]
-        # import pickle 
-        # with open("camera_list_mv_unet.pkl", "wb") as f:
-        #     pickle.dump(camera.reshape(-1, 4, 4), f)
-        # assert False
-
-        if camera is None:
-            F = 1
-        else:
-            F = camera.shape[0]
-            # if latents.shape[0] == B:
-            #     latents = latents.unsqueeze(1).expand(B, F, -1, -1, -1).reshape(-1, *latents.shape[1:])
-            
-            # encoder_hidden_states = encoder_hidden_states.unsqueeze(1).expand(B, F, -1, -1).reshape(-1, *encoder_hidden_states.shape[1:])
-            B = BF // F
-            # print(B, F)
-            camera = camera.unsqueeze(0).expand(B, F, -1).reshape(-1, *camera.shape[1:])
-
-        # print('camera', camera.shape)
-        # print('latents num', latents[...,0, 0, 0], t) # c, h, w
-        t = t.expand(BF).to(device)
-        if get_inp:
-            return {
-                'x': latents,
-                'timesteps': t,
-                'context': encoder_hidden_states,
-                'camera': camera,
-                'num_frames': F,
-            }
-        # print('after expand', latents.shape, t.shape, encoder_hidden_states.shape, camera.shape)
-        # forward
-        noise_pred = self.unet(
-            latents, 
-            t, 
-            encoder_hidden_states, 
-            camera=camera, num_frames=F,
-        )  # (BF, C, H, W)
-
-        # only use output F=0 # nah!!!
-        # noise_pred = noise_pred.reshape(B, F, *noise_pred.shape[1:])[:, 0] # (B, C, H, W)
-        return noise_pred
 
 if __name__ == '__main__':
 
@@ -634,14 +515,13 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str)
     parser.add_argument('prompt', type=str)
     parser.add_argument('--negative', default='', type=str)
     parser.add_argument(
         '--sd_version',
         type=str,
         default='2.1',
-        choices=['1.5', '2.0', '2.1'],
+        choices=['mv', '1.5', '2.0', '2.1'],
         help="stable diffusion version"
     )
     parser.add_argument(
@@ -652,31 +532,15 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--steps', type=int, default=50)
     opt = parser.parse_args()
-    
-    from cores.main_mc import load_config
-    from cores.lib.provider import ViewDataset
-    cfg = load_config(opt.config, default_path="configs/default.yaml")
 
     seed_everything(opt.seed)
 
     device = torch.device('cuda')
 
-
-    test_loader = ViewDataset(
-                cfg,
-                device=device,
-                type='test',
-                H=cfg.test.H,
-                W=cfg.test.W,
-                size=100,
-                render_head=True
-            ).dataloader()
     sd = StableDiffusion(device, opt.sd_version, opt.hf_key)
     # visualize image
 
     plt.show()
-    # for test_data in test_loader:
-        
     imgs = sd.prompt_to_img(opt.prompt, opt.negative, opt.H, opt.W, opt.steps)
 
     plt.imshow(imgs[0])

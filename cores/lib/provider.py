@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .camera_utils import *
-
+from mvdream_diffusers.mv_unet import get_camera_condition
 
 def get_view_direction(thetas, phis, overhead, front, phi_diff=0):
     #                   phis [B,];          thetas: [B,]
@@ -16,6 +16,8 @@ def get_view_direction(thetas, phis, overhead, front, phi_diff=0):
     # side (right) = 3  [180+front, 360)
     # top = 4                               [0, overhead]
     # bottom = 5                            [180-overhead, 180]
+    # TODO
+    phis = phis.clone()
     phis += phi_diff / 180 * np.pi
     phis[phis >= 2 * np.pi] -= np.pi * 2
     phis[phis < 0] += np.pi * 2
@@ -45,6 +47,7 @@ def rand_poses(
     uniform_sphere_rate=0.5,
     phi_diff=0,
     center_offset=0.,
+    num_frame=1,
 ):
     ''' generate random poses from an orbit camera
     Args:
@@ -54,9 +57,8 @@ def rand_poses(
         theta_range: [min, max], should be in [0, pi]
         phi_range: [min, max], should be in [0, 2 * pi]
     Return:
-        poses: [size, 4, 4]
+        poses: [size*num_frame, 4, 4]
     '''
-
     theta_range = np.deg2rad(theta_range)
     phi_range = np.deg2rad(phi_range)
     angle_overhead = np.deg2rad(angle_overhead)
@@ -77,6 +79,8 @@ def rand_poses(
         thetas = torch.acos(unit_centers[:, 1])
         phis = torch.atan2(unit_centers[:, 0], unit_centers[:, 2])
         phis[phis < 0] += 2 * np.pi
+
+        thetas, phis = expand_to_4poses(thetas, phis, num_frames=num_frame)
         centers = unit_centers * radius.unsqueeze(-1)
         centers = centers + centers.new_tensor(center_offset)
     else:
@@ -85,7 +89,7 @@ def rand_poses(
         thetas = torch.rand(size,
                             device=device) * (theta_range[1] - theta_range[0]) + theta_range[0]
         phis = torch.rand(size, device=device) * (phi_range[1] - phi_range[0]) + phi_range[0]
-
+        thetas, phis = expand_to_4poses(thetas, phis, num_frames=num_frame)
         centers = torch.stack([
             radius * torch.sin(thetas) * torch.sin(phis),
             radius * torch.cos(thetas) + heights,
@@ -114,7 +118,7 @@ def rand_poses(
 
     up_vector = safe_normalize(torch.cross(right_vector, forward_vector, dim=-1) + up_noise)
 
-    poses = torch.eye(4, dtype=torch.float, device=device).unsqueeze(0).repeat(size, 1, 1)
+    poses = torch.eye(4, dtype=torch.float, device=device).unsqueeze(0).repeat(size*num_frame, 1, 1)
     poses[:, :3, :3] = torch.stack((right_vector, up_vector, forward_vector), dim=-1)
     poses[:, :3, 3] = centers
 
@@ -123,8 +127,50 @@ def rand_poses(
     else:
         dirs = None
 
-    return poses, dirs, radius
+    return poses, dirs, radius, thetas, phis
 
+
+def expand_to_4poses(thetas, phis, num_frames=4):
+    device = thetas.device
+    thetas = thetas.repeat(num_frames)
+    # (0, top, pi bottom) --> (-pi/2 top, pi/2 bottoem)
+    
+    # maybe need to -= phi_diff
+    # phis = phis + phi_diff / 180 * np.pi
+    phis = phis.repeat(num_frames)
+    delta_phis = torch.linspace(0, 2 * np.pi, num_frames+1)[:num_frames].to(device)
+    phis = phis + delta_phis
+
+    return thetas, phis
+
+
+def get_mv_pose(thetas, phis, radius, phi_diff=0, blender_coord=True):
+    """
+
+    :param thetas: (F, ) in radius
+    :param phis: (F, ) -- azimuth??
+    :param radius: (1, )
+    :param num_frames: _description_, defaults to 4
+    :return poses: (num_frames, 4, 4)
+    """
+    device = thetas.device
+    num_frames = thetas.shape[0]
+    # thetas = thetas.repeat(num_frames)
+    # (0, top, pi bottom) --> (-pi/2 top, pi/2 bottoem)
+    thetas = thetas - np.pi / 2
+    thetas = -thetas
+    # thetas = thetas - np.pi
+
+    # maybe need to -= phi_diff
+    phis = np.pi - phis - np.pi / 2
+    # phis = phis + np.pi / 2
+    # phis = np.pi
+
+    if isinstance(radius, float):
+        radius = torch.tensor([radius] * num_frames, device=device)
+    radius = radius.expand([num_frames])
+    pose = get_camera_condition(phis, thetas, radius, blender_coord=blender_coord)  # # kiui's elevation is negated, [4, 4] (4, 4)
+    return pose
 
 def circle_poses(
     device,
@@ -137,6 +183,7 @@ def circle_poses(
     phi_diff=0,
     height=0,
     center_offset=0.,
+    num_frame=1,
 ):
 
     theta = np.deg2rad(theta)
@@ -147,6 +194,7 @@ def circle_poses(
     thetas = torch.FloatTensor([theta]).to(device)
     phis = torch.FloatTensor([phi]).to(device)
 
+    thetas, phis = expand_to_4poses(thetas, phis, num_frames=num_frame)
     centers = torch.stack([
         radius * torch.sin(thetas) * torch.sin(phis),
         radius * torch.cos(thetas) + height,
@@ -164,7 +212,7 @@ def circle_poses(
     right_vector = safe_normalize(torch.cross(forward_vector, up_vector, dim=-1))
     up_vector = safe_normalize(torch.cross(right_vector, forward_vector, dim=-1))
 
-    poses = torch.eye(4, dtype=torch.float, device=device).unsqueeze(0)
+    poses = torch.eye(4, dtype=torch.float, device=device).unsqueeze(0).repeat(num_frame, 1, 1)
     poses[:, :3, :3] = torch.stack((right_vector, up_vector, forward_vector), dim=-1)
     poses[:, :3, 3] = centers
 
@@ -173,7 +221,7 @@ def circle_poses(
     else:
         dirs = None
 
-    return poses, dirs, radius
+    return poses, dirs, radius, thetas, phis
 
 
 class ViewDataset:
@@ -228,7 +276,7 @@ class ViewDataset:
                 can_pose = random.random() < self.cfg.train.can_pose_sample_ratio
             # random pose on the fly
             if random.random() < self.cfg.train.face_sample_ratio:
-                poses, dirs, radius = rand_poses(
+                poses, dirs, radius,thetas, phis = rand_poses(
                     B,
                     self.device,
                     radius_range=self.cfg.train.face_radius_range,
@@ -244,11 +292,12 @@ class ViewDataset:
                     center_offset=np.array(
                         self.cfg.train.head_position if not can_pose else self.cfg.train.
                         canpose_head_position
-                    )
+                    ),
+                    num_frame=4,
                 )
                 is_face = True
             else:
-                poses, dirs, radius = rand_poses(
+                poses, dirs, radius,thetas, phis = rand_poses(
                     B,
                     self.device,
                     radius_range=self.cfg.train.radius_range,
@@ -261,6 +310,7 @@ class ViewDataset:
                     theta_range=self.cfg.train.theta_range,
                     phi_range=self.get_phi_range(),
                     height_range=self.cfg.train.height_range,
+                    num_frame=4,
                 )
             # random focal
             fov = random.random() * (self.cfg.train.fovy_range[1] -
@@ -269,7 +319,7 @@ class ViewDataset:
             # circle pose
             phi = ((index[0] / self.num_frames) * 360) % 360
             if index[0] < self.num_frames:
-                poses, dirs, radius = circle_poses(
+                poses, dirs, radius, thetas, phis = circle_poses(
                     self.device,
                     radius=self.cfg.train.radius_range[1] * 0.9,
                     theta=90,
@@ -277,11 +327,12 @@ class ViewDataset:
                     return_dirs=self.cfg.guidance.use_view_prompt,
                     angle_overhead=self.cfg.train.angle_overhead,
                     angle_front=self.cfg.train.angle_front,
-                    phi_diff=self.cfg.train.phi_diff
+                    phi_diff=self.cfg.train.phi_diff,
+                    num_frame=4,
                 )
             else:
                 is_face = True
-                poses, dirs, radius = circle_poses(
+                poses, dirs, radius,thetas, phis = circle_poses(
                     self.device,
                     radius=self.cfg.train.face_radius_range[0],
                     height=self.cfg.train.face_height_range[0],
@@ -291,14 +342,19 @@ class ViewDataset:
                     angle_overhead=self.cfg.train.angle_overhead,
                     angle_front=self.cfg.train.angle_front,
                     phi_diff=self.cfg.train.phi_diff,
-                    center_offset=np.array(self.cfg.train.head_position)
+                    center_offset=np.array(self.cfg.train.head_position),
+                    num_frame=4,
                 )
 
             # fixed focal
             fov = (self.cfg.train.fovy_range[1] + self.cfg.train.fovy_range[0]) / 2
 
+        cameras = get_mv_pose(thetas, phis, radius, phi_diff=self.cfg.train.phi_diff,
+                               blender_coord=True)
         focal = self.H / (2 * np.tan(np.deg2rad(fov) / 2))
         intrinsics = np.array([focal, focal, self.cx, self.cy])
+        F = cameras.shape[0]
+        intrinsics = torch.tensor(intrinsics, dtype=torch.float32, device=self.device).unsqueeze(0).repeat(F, 1)
 
         projection = torch.tensor([[2 * focal / self.W, 0, 0, 0], [0, -2 * focal / self.H, 0, 0],
                                    [
@@ -326,10 +382,12 @@ class ViewDataset:
         data = {
             'H': self.H,
             'W': self.W,
-            'mvp': mvp[0],    # [4, 4]
+            # 'mvp': mvp[0],    # [4, 4]
+            'mvp': mvp,    # [4, 4]
             'poses': poses,    # [1, 4, 4]
             'intrinsics': intrinsics,
             'dir': dirs,
+            'camera': cameras,  # cameras for mvfusion [F, 4, 4]
             'near_far': [self.near, self.far],
             'is_face': is_face,
             'radius': radius,

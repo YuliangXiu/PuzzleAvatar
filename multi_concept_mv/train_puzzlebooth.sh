@@ -54,9 +54,10 @@ python -m multi_concept_mv.train_puzzlebooth \
   --lora_r=32 \
   --enable_xformers_memory_efficient_attention \
   --use_peft ${peft_type} \
+  --do_not_apply_masked_prior 
+  
   # --wandb_mode "offline" \
   # --use_shape_description \
-  # --do_not_apply_masked_prior \
   # --no_prior_preservation \
 
 # # Step 2: Run multi-concept DreamBooth inference

@@ -267,6 +267,7 @@ class Mesh():
 
         # auto-fix texture
         if mesh.vt is None and not use_vertex_tex and init_uv:
+            # print('chang it back')
             mesh.auto_uv(cache_path=path)
 
             print(f'[load_obj] vt: {mesh.vt.shape}, ft: {mesh.ft.shape}')
@@ -326,7 +327,16 @@ class Mesh():
         
         print('[INFO] Using atlas to calculate UV. It takes 10~20min.')
         # try to load cache
-
+        if cache_path is not None:
+            cache_path = cache_path.replace('.obj', '_uv.pkl')
+        if os.path.exists(cache_path):
+            import pickle
+            with open(cache_path, 'rb') as f:
+                uv = pickle.load(f)
+            self.vt = torch.tensor(uv[0], dtype=torch.float32, device=self.device)
+            self.ft = torch.tensor(uv[1].astype(np.int64), dtype=torch.long, device=self.device)
+            return
+            
         import xatlas
         v_np = self.v.cpu().numpy() * 100
         f_np = self.f.int().cpu().numpy()
@@ -343,6 +353,13 @@ class Mesh():
 
         self.vt = vt
         self.ft = ft
+
+        # save cache
+        if cache_path is not None:
+            import pickle
+            with open(cache_path, 'wb') as f:
+                pickle.dump([vt_np, ft_np], f)
+
 
     def to(self, device):
         self.device = device

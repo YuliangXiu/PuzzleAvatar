@@ -1,8 +1,9 @@
 #import nvdiffrast.torch as dr
+import sys
 import argparse
 import json
 import os
-
+from collections import defaultdict
 import torch
 import trimesh
 import logging
@@ -15,8 +16,9 @@ from utils.body_utils.lib import smplx
 from utils.body_utils.lib.dataset.mesh_util import SMPLX
 
 torch.set_float32_matmul_precision('high')
-torch._dynamo.config.verbose = False
+# torch._dynamo.config.verbose = False
 logging.getLogger("torch._dynamo").setLevel(logging.CRITICAL)
+sys.path.append(os.path.join(os.path.dirname(__file__), "../mvdream_diffusers"))
 
 
 def load_config(path, default_path=None):
@@ -93,11 +95,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, required=True, help="config file")
     parser.add_argument('--exp_dir', type=str, required=True, help="experiment dir")
+    parser.add_argument('--data_dir', type=str, required=True, help="data dir")
     parser.add_argument('--sub_name', type=str, required=True, help="subject name")
     parser.add_argument('--seed', type=int, default=42, help="random seed")
     parser.add_argument('--use_peft', type=str, default="none", help="none/lora/boft")
     parser.add_argument('--test', action="store_true")
     parser.add_argument('--use_shape_description', action="store_true")
+    parser.add_argument('--pretrain', default='output/puzzle_int', help="pretrained model dir")
 
     opt = parser.parse_args()
     cfg = load_config(opt.config, default_path="configs/default.yaml")
@@ -107,13 +111,15 @@ if __name__ == '__main__':
     cfg.exp_root = opt.exp_dir
     cfg.sub_name = opt.sub_name
     cfg.use_peft = opt.use_peft
+    cfg.pretrain = opt.pretrain
 
     if cfg.guidance.use_dreambooth:
         cfg.guidance.hf_key = opt.exp_dir
 
     if cfg.guidance.text is None:
+        # os.path.join(opt.exp_dir.replace("results", "data"), 'gpt4v_simple.json'), 'r'
         with open(
-            os.path.join(opt.exp_dir.replace("results", "data"), 'gpt4v_simple.json'), 'r'
+            os.path.join(opt.data_dir, 'gpt4v_simple.json'), 'r'
         ) as f:
             gpt4v_response = json.load(f)
             gender, cfg.guidance.text, cfg.guidance.text_head, placeholders = dict_to_prompt(
@@ -124,8 +130,8 @@ if __name__ == '__main__':
             print(f"Using head prompt: {cfg.guidance.text_head}")
 
     # create smplx base meshes wrt gender
-    smplx_path = os.path.join(opt.exp_dir.replace("results", "data"), f"smplx_{gender}.obj")
-    keypoint_path = os.path.join(opt.exp_dir.replace("results", "data"), f"smplx_{gender}.npy")
+    smplx_path = os.path.join(opt.data_dir, f"smplx_{gender}.obj")
+    keypoint_path = os.path.join(opt.data_dir, f"smplx_{gender}.npy")
 
     cfg.data.last_model = smplx_path
     cfg.data.keypoints_path = keypoint_path
@@ -154,7 +160,7 @@ if __name__ == '__main__':
         if use_puzzle:
 
             smpl_param_path = os.path.join(
-                opt.exp_dir.replace("results", "data").replace("puzzle_cam", "fitting"),
+                opt.data_dir.replace("puzzle_cam", "fitting"),
                 "smplx/smplx.pkl"
             )
             print(f"SMPL pkl path: {smpl_param_path}")
@@ -196,6 +202,27 @@ if __name__ == '__main__':
 
     if cfg.test.test:
         guidance = None    # no need to load guidance model at test
+        if cfg.guidance.type == 'stable-diffusion':
+            from cores.lib.guidance import StableDiffusion
+            guidance = StableDiffusion(
+                device,
+                placeholders,
+                cfg.use_peft,
+                cfg.guidance.sd_version,
+                # 'mv',
+                cfg.guidance.hf_key,
+                cfg.guidance.step_range,
+                cfg.train.tet_subdiv_steps,
+                cfg.train.iters,
+                controlnet=cfg.guidance.controlnet,
+                lora=cfg.guidance.lora,
+
+                cfg=cfg,
+                head_hf_key=cfg.guidance.head_hf_key
+            )
+            for p in guidance.parameters():
+                p.requires_grad = False
+
         trainer = Trainer(
             'df',
             cfg,
@@ -218,6 +245,21 @@ if __name__ == '__main__':
                 size=100,
                 render_head=True
             ).dataloader()
+            # camera_list = defaultdict(list)
+            # for data in test_loader:
+            #     camera_list[data['dir'].item()].append(data['camera'])
+            # for key, values in camera_list.items():
+            #     camera_list[key] = torch.stack(values, dim=0).reshape(-1, 4, 4)
+            # import pickle
+            # os.makedirs('results', exist_ok=True)
+            # with open(os.path.join('results', 'gyuidance.pkl'), 'wb') as f:
+            #     pickle.dump(guidance, f)
+            # assert False
+                
+            # with open(os.path.join('camera_list_mc.pkl'), 'wb') as f:
+            #     pickle.dump(camera_list, f)
+            #     assert False
+
             trainer.test(test_loader, write_image=cfg.test.write_image)
             if cfg.data.can_pose_folder is not None:
                 trainer.test(test_loader, write_image=cfg.test.write_image, can_pose=True)
@@ -237,12 +279,14 @@ if __name__ == '__main__':
                 placeholders,
                 cfg.use_peft,
                 cfg.guidance.sd_version,
+                # 'mv',
                 cfg.guidance.hf_key,
                 cfg.guidance.step_range,
                 cfg.train.tet_subdiv_steps,
                 cfg.train.iters,
                 controlnet=cfg.guidance.controlnet,
                 lora=cfg.guidance.lora,
+
                 cfg=cfg,
                 head_hf_key=cfg.guidance.head_hf_key
             )

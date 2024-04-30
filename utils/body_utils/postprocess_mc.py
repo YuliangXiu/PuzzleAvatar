@@ -1,15 +1,16 @@
 import argparse
-
 import numpy as np
 import torch
 import trimesh
 from glob import glob
-from lib.dataset.mesh_util import SMPLX, mesh_simplify, keep_largest, poisson
+from .lib.dataset.mesh_util import SMPLX, mesh_simplify, keep_largest, poisson
 from scipy.spatial import cKDTree
 
 # loading cfg file
 parser = argparse.ArgumentParser()
 parser.add_argument("-d", "--dir", type=str, default="exp/demo/teaser/obj/")
+parser.add_argument("--data_dir", type=str, default="exp/demo/teaser/obj/")
+
 parser.add_argument("-n", "--name", type=str, default="")
 parser.add_argument("-g", "--gpu", type=int, default=0)
 parser.add_argument("-t", "--type", type=str, default="smplx")
@@ -20,7 +21,7 @@ smplx_container = SMPLX()
 device = torch.device(f"cuda:{args.gpu}")
 
 # load smplx and TeCH objs
-smplx_path = glob(f"{args.dir.replace('results', 'data')}/smplx_*.obj")[0]
+smplx_path = glob(f"{args.data_dir}/smplx_*.obj")[0]
 tech_path = f"{args.dir}/obj/{args.name}_geometry.obj"
 smplx_obj = trimesh.load(smplx_path, maintain_orders=True, process=False)
 tech_obj = trimesh.load(tech_path, maintain_orders=True, process=False)

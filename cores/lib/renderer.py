@@ -283,11 +283,13 @@ class Renderer(nn.Module):
         return params
 
     @torch.no_grad()
-    def export_mesh(self, save_path, name='mesh', export_uv=False):
+    def export_mesh(self, save_path, name='mesh', export_uv=False, div=None):
         
         self.resize_matrix_inv = self.mesh.resize_matrix_inv
         if self.dmtet_network is not None:
             num_subdiv = self.get_num_subdiv()
+            if div is not None:
+                num_subdiv = div
             with torch.no_grad():
                 verts, faces, loss = self.dmtet_network.get_mesh(num_subdiv=num_subdiv)
             self.mesh = Mesh(v=verts, f=faces.int(), device='cuda', split=True)
@@ -562,6 +564,71 @@ class Renderer(nn.Module):
         return self.cfg.model.tet_num_subdiv
 
     def forward(
+        self, 
+        rays_o,
+        rays_d,
+        mvp,
+        h0,
+        w0,
+        light_d=None,
+        ref_rgb=None,
+        ambient_ratio=1.0,
+        shading='albedo',
+        alpha_only=False,
+        detach_geo=False,
+        albedo_ref=False,
+        poses=None,
+        return_openpose_map=False,
+        global_step=1e7,
+        return_can_pos_map=False,
+        mesh=None,
+        can_pose=False
+    ):        
+        result_list = []
+        if mvp.ndim == 2:
+            mvp = mvp.unsuqeeze(0)
+        # inp_kwargs = {
+        #     'rays_o': rays_o,  
+        #     'rays_d': rays_d,
+        #     'mvp': mvp,
+        #     'h0': h0,
+        #     'w0': w0,
+        #     'light_d': light_d,
+        #     'ref_rgb': ref_rgb,
+        #     'ambient_ratio': ambient_ratio,
+        #     'shading': shading,
+        #     'alpha_only': alpha_only,
+        #     'detach_geo': detach_geo,
+        #     'albedo_ref': albedo_ref,
+        #     'poses': poses,
+        #     'return_openpose_map': return_openpose_map,
+        #     'global_step': global_step,
+        #     'return_can_pos_map': return_can_pos_map,
+        #     'mesh': mesh,
+        #     'can_pose': can_pose
+        # }
+        # for k, v in inp_kwargs.items():
+        #     if isinstance(v, torch.Tensor):
+        #         print(k, type(v), )
+        #         print(v.shape)
+        for i in range(mvp.shape[0]):
+            result = self._forward(
+                rays_o[i], rays_d[i], mvp[i], h0, w0, light_d, ref_rgb, ambient_ratio, shading,
+                alpha_only, detach_geo, albedo_ref, poses[i:i+1], return_openpose_map, global_step,
+                return_can_pos_map, mesh, can_pose
+            )
+            result_list.append(result)
+        result_all = {}
+        for key in result_list[0].keys():
+            if torch.is_tensor(result_list[0][key]):
+                result_all[key] = torch.cat([result[key] for result in result_list])
+                # print(key, result_all[key].shape)
+            else:
+                result_all[key] = result_list[0][key]
+                # print(key)
+        return result_all
+            
+    def _forward(
         self,
         rays_o,
         rays_d,

@@ -1,3 +1,8 @@
+
+bash scripts/shape_color_mv.sh human/yuliang_500 xiu human/yuliang
+
+
+ 
 bash multi_concept_mv/test_puzzlebooth.sh \
     data/human/yuliang/ \
     output/dev_puzzle \
@@ -8,7 +13,7 @@ bash multi_concept_mv/test_puzzlebooth.sh \
 
 bash multi_concept_mv/train_puzzlebooth.sh \
         data/human/yuliang/ \
-        output/puzzle_int \
+        output/puzzle_int_noattn \
         traintest mv \
 
 

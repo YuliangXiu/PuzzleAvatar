@@ -1,3 +1,5 @@
+import pickle
+import kiui
 import glob
 import os
 import random
@@ -23,7 +25,8 @@ from .annotators import Cannydetector, HEDdetector
 from .camera_utils import *
 from .loss_utils import *
 
-
+import os.path as osp
+from jutils import image_utils
 def scale_for_lpips(image_tensor):
     return image_tensor * 2. - 1.
 
@@ -35,6 +38,7 @@ def seed_everything(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
+div = 0
 
 class Trainer(object):
     def __init__(
@@ -350,6 +354,7 @@ class Trainer(object):
                 # explicit negative dir-encoded text
                 text_z = self.guidance.get_text_embeds([text], [negative_text])
                 self.text_z.append(text_z)
+            self.text_z = torch.stack(self.text_z, 0)
 
             if self.cfg.train.face_sample_ratio > 0.:
                 self.face_text_z_novd = self.guidance.get_text_embeds([
@@ -368,6 +373,7 @@ class Trainer(object):
                     # explicit negative dir-encoded text
                     text_z = self.guidance.get_text_embeds([text], [negative_text], is_face=True)
                     self.face_text_z.append(text_z)
+                self.face_text_z = torch.stack(self.face_text_z, 0)
 
             if (self.cfg.guidance.normal_text
                 is not None) and (len(self.cfg.guidance.normal_text) > 0):
@@ -388,6 +394,7 @@ class Trainer(object):
                     # explicit negative dir-encoded text
                     text_z = self.guidance.get_text_embeds([text], [negative_text])
                     self.normal_text_z.append(text_z)
+                self.normal_text_z = torch.stack(self.normal_text_z, 0)
 
                 basic_prompt = self.cfg.guidance.text_head if (
                     self.cfg.guidance.text_head is not None
@@ -406,6 +413,8 @@ class Trainer(object):
                     # explicit negative dir-encoded text
                     text_z = self.guidance.get_text_embeds([text], [negative_text])
                     self.face_normal_text_z.append(text_z)
+                    # print('face normal', text_z.shape, len([[[text], [negative_text]]]))
+                self.face_normal_text_z = torch.stack(self.face_normal_text_z, 0)
             if (self.cfg.guidance.textureless_text
                 is not None) and (len(self.cfg.guidance.textureless_text)) > 0:
                 print('get textureless text prompt')
@@ -422,6 +431,7 @@ class Trainer(object):
                     # explicit negative dir-encoded text
                     text_z = self.guidance.get_text_embeds([text], [negative_text])
                     self.textureless_text_z.append(text_z)
+                self.textureless_text_z = torch.stack(self.textureless_text_z, 0)
 
                 self.face_textureless_text_z_novd = self.guidance.get_text_embeds([
                     f"{self.cfg.guidance.textureless_text} of the face of {self.cfg.guidance.text_head}, {self.cfg.guidance.textureless_text_extra}"
@@ -436,6 +446,7 @@ class Trainer(object):
                     # explicit negative dir-encoded text
                     text_z = self.guidance.get_text_embeds([text], [negative_text])
                     self.face_textureless_text_z.append(text_z)
+                self.face_textureless_text_z = torch.stack(self.face_textureless_text_z, 0)
 
     def __del__(self):
         if self.log_ptr:
@@ -471,7 +482,7 @@ class Trainer(object):
         mvp = data['mvp']
         poses = data['poses']
         H, W = data['H'], data['W']
-
+        N = data['poses'].shape[0]
         rays = get_rays(data['poses'], data['intrinsics'], H, W, -1)
         rays_o = rays['rays_o']    # [B, N, 3]
         rays_d = rays['rays_d']    # [B, N, 3]
@@ -491,8 +502,9 @@ class Trainer(object):
             mesh=step_mesh
         )
         # [1, 3, H, W]
-        pred_rgb = outputs['image'].reshape(1, H, W, 3).permute(0, 3, 1, 2).contiguous()
-        pred_depth = outputs['depth'].reshape(1, H, W)
+        N = poses.shape[0]
+        pred_rgb = outputs['image'].reshape(N, H, W, 3).permute(0, 3, 1, 2).contiguous()
+        pred_depth = outputs['depth'].reshape(N, H, W)
 
         if step_mesh is None:
             step_mesh = outputs['mesh']
@@ -529,7 +541,14 @@ class Trainer(object):
             text_z = self.text_z
             text_z_novd = self.text_z
 
-        guidance_loss = self.guidance.train_step(
+        debug = self.global_step % 250 == 0 or self.global_step == 1
+        NF, B = text_z.shape[:2]
+        # print('face normal', self.face_normal_text_z.shape)
+        text_z = text_z.transpose(0, 1).reshape(B*NF, *text_z.shape[-2:])
+        text_z_novd = text_z_novd.unsqueeze(1).repeat(1, NF, 1, 1).reshape(B*NF, *text_z_novd.shape[-2:])
+        # torch.Size([3, 4, 77, 1024]) torch.Size([3, 77, 1024]) torch.Size([4, 3, 512, 512]) torch.Size([4, 4, 4]) torch.Size([4, 16])
+        # print('guidance', text_z.shape, text_z_novd.shape, pred_rgb.shape, data['poses'].shape, data['camera'].shape)
+        guidance_loss, guidance_rtn = self.guidance.train_step(
             text_z,
             pred_rgb,
             guidance_scale=self.cfg.guidance.guidance_scale,
@@ -540,8 +559,39 @@ class Trainer(object):
             is_face=is_face,
             cur_epoch=self.epoch,
             stage=self.stage,
+            camera=data['camera'], # (4, 16)
+            debug=debug,
         )
+        # print(guidance_loss)
+        if debug:
+            img_list = [guidance_rtn['orig'], guidance_rtn['1-step'],]
+            if 'multi-step' in guidance_rtn:
+                img_list += [guidance_rtn['multi-step']]
+            img_save = torch.cat(img_list, dim=0)
+            N = len(guidance_rtn['1-step'])
+            # print(osp.join(self.workspace, 'visualize', f'{self.global_step:04d}_guidance'))
+            image_utils.save_images(
+                img_save, 
+                osp.join(self.workspace, 'visualize', f'{self.global_step:04d}_guidance'), 
+                col=N)
+            image_utils.save_images(pred_rgb, osp.join(self.workspace, 'visualize', f'{self.global_step:04d}_render'))
 
+            device = self.device
+            name = 'prompt2img'
+            i = self.global_step
+            save_path = os.path.join(self.workspace, 'visualize')
+            _, images, rtn = self.guidance.prompt_to_img([self.cfg.guidance.text],
+                                    [self.cfg.guidance.negative], 
+                                    self.guidance.res, self.guidance.res,
+                                    num_inference_steps=50,
+                                    latents=torch.randn([4, 4, 32, 32], device=device),
+                                    guidance_scale=5,
+                                    camera=data['camera'],) # (4, 16)
+        
+            # print(self.cfg.guidance.text)
+            print(osp.join(save_path, f'{name}_{i:04d}_prompt'))
+            image_utils.save_images(images, osp.join(save_path, f'{name}_{i:04d}_prompt'))
+            
         loss += guidance_loss
         loss_dict['guidance_loss'] = f"{guidance_loss.item():.5f}"
 
@@ -552,7 +602,8 @@ class Trainer(object):
             lap_loss = 0
             eikonal_loss = 0
 
-            if self.cfg.train.lambda_lap > 0 and self.global_step >= self.subdiv_steps[0]:
+            if self.subdiv_steps is not None and len(self.subdiv_steps) > 0 and \
+                  self.cfg.train.lambda_lap > 0 and self.global_step >= self.subdiv_steps[0]:
                 lap_loss = laplacian_loss(mesh.v, mesh.f.long())
                 loss += self.cfg.train.lambda_lap * lap_loss
                 loss_dict['lap_loss'] = f"{lap_loss.item() * self.cfg.train.lambda_lap:.5f}"
@@ -561,13 +612,17 @@ class Trainer(object):
                 loss += self.cfg.train.lambda_eik * eikonal_loss
                 loss_dict['depth_loss'] = f"{eikonal_loss.item() * self.cfg.train.lambda_eik:.5f}"
 
-        if verbose:
-            pprint.pprint(loss_dict)
+        # if verbose:
+        pprint.pprint(loss_dict)
+
+        if self.cfg.train.tet_subdiv_steps is not None \
+            and len(self.cfg.train.tet_subdiv_steps) > 1 and \
+                np.abs(self.global_step - self.cfg.train.tet_subdiv_steps[0]) <= 1:
+            self.save_checkpoint(name=f'step{self.global_step}', full=True, best=True)
 
         return pred_rgb, pred_depth, loss
 
     def eval_step(self, data, no_resize=True):
-
         is_face = data['is_face']
         mvp = data['mvp']
         if no_resize and not is_face:
@@ -602,8 +657,9 @@ class Trainer(object):
             shading=shading,
             global_step=self.global_step
         )
-        pred_rgb = outputs['image'].reshape(1, H, W, 3)
-        pred_depth = outputs['depth'].reshape(1, H, W)
+        N = poses.shape[0]
+        pred_rgb = outputs['image'].reshape(N, H, W, 3)
+        pred_depth = outputs['depth'].reshape(N, H, W)
         outputs_normal = self.model(
             rays_o,
             rays_d,
@@ -616,7 +672,7 @@ class Trainer(object):
             shading='normal',
             global_step=self.global_step
         )
-        pred_norm = outputs_normal['image'].reshape(1, H, W, 3)
+        pred_norm = outputs_normal['image'].reshape(N, H, W, 3)
         # dummy
         loss = torch.zeros([1], device=pred_rgb.device, dtype=pred_rgb.dtype)
 
@@ -631,8 +687,8 @@ class Trainer(object):
             mvp = mvp @ self.model.mesh.resize_matrix_inv
         poses = data['poses']
         H, W = data['H'], data['W']
-
-        rays = get_rays(data['poses'], data['intrinsics'], H, W, -1)
+        # print(data['poses'].shape, data['intrinsics'].shape, H, W)
+        rays = get_rays(data['poses'], data['intrinsics'], H, W, N=-1)
         rays_o = rays['rays_o']    # [B, N, 3]
         rays_d = rays['rays_d']    # [B, N, 3]
 
@@ -677,14 +733,16 @@ class Trainer(object):
             mesh=mesh,
             can_pose=can_pose
         )
-        pred_norm = outputs_normal['image'].reshape(1, H, W, 3)    #[:, :, W//4: W//4 + W//2]
+        N = poses.shape[0]
+        # print(N)
+        pred_norm = outputs_normal['image'].reshape(N, H, W, 3)    #[:, :, W//4: W//4 + W//2]
 
-        pred_rgb = outputs['image'].reshape(1, H, W, 3)    #[:, :, W//4: W//4 + W//2]
-        pred_depth = outputs['depth'].reshape(1, H, W)    #[:, :, W//4: W//4 + W//2]
-        pred_alpha = outputs['alpha'].reshape(1, H, W, 1)    #[:, :, W//4: W//4 + W//2]
+        pred_rgb = outputs['image'].reshape(N, H, W, 3)    #[:, :, W//4: W//4 + W//2]
+        pred_depth = outputs['depth'].reshape(N, H, W)    #[:, :, W//4: W//4 + W//2]
+        pred_alpha = outputs['alpha'].reshape(N, H, W, 1)    #[:, :, W//4: W//4 + W//2]
         pred_mesh = outputs.get('mesh', None)
         if self.render_openpose:
-            openpose_map = outputs['openpose_map'].reshape(1, H, W, 3)    #[:, :, W//4: W//4 + W//2]
+            openpose_map = outputs['openpose_map'].reshape(N, H, W, 3)    #[:, :, W//4: W//4 + W//2]
         else:
             openpose_map = None
 
@@ -701,7 +759,7 @@ class Trainer(object):
 
         os.makedirs(save_path, exist_ok=True)
 
-        self.model.export_mesh(save_path, name=name, export_uv=self.cfg.test.save_uv)
+        self.model.export_mesh(save_path, name=name, export_uv=self.cfg.test.save_uv, div=div)
 
         self.log(f"==> Finished saving mesh.")
 
@@ -791,23 +849,64 @@ class Trainer(object):
 
         with torch.no_grad():
             mesh = None
+            pipe = self.guidance.pipe
             for i, data in enumerate(loader):
+                # device = data['camera'].device
+                # _, images, rtn = self.guidance.prompt_to_img([self.cfg.guidance.text],
+                #                         [self.cfg.guidance.negative], 
+                #                         self.guidance.res, self.guidance.res,
+                #                         num_inference_steps=50,
+                #                         latents=torch.randn([4, 4, 32, 32], device=device),
+                #                         guidance_scale=5,
+                #                         camera=data['camera'],) # (4, 16)
+            
+                # print(self.cfg.guidance.text)
+                # print(osp.join(save_path, f'{name}_{i:04d}_prompt'))
+                # image_utils.save_images(images, osp.join(save_path, f'{name}_{i:04d}_prompt'))
+
+                # image = pipe(
+                #     self.cfg.guidance.text,
+                #     negative_prompt="",
+                #     guidance_scale=5,
+                #     num_inference_steps=30,
+                #     camera=data['camera'],
+                #     num_frames=4,
+                #     text_embedding=rtn['text_embeds']
+                # )
+                # grid = np.concatenate(image, axis=1)
+                # kiui.write_image(osp.join(save_path, f'{name}_{i:04d}_pipeline.jpg'), grid)
+
+                # with open('results/data.pkl', 'wb') as f:
+                #     pickle.dump({'data': data, 'cfg': self.cfg}, f)
+                # assert False
+                #  data['cameras']
+                # if i >= 10:
+                #     assert False
                 with torch.cuda.amp.autocast(enabled=self.fp16):
                     preds, preds_depth, preds_norm, preds_alpha, openpose_map, pred_mesh = self.test_step(
                         data, mesh=mesh, can_pose=can_pose, no_resize=not can_pose
                     )
                 if mesh is None:
                     mesh = pred_mesh
-                preds_alpha = preds_alpha[0].detach().cpu().numpy()
+                # preds_alpha = preds_alpha[0].detach().cpu().numpy()
+                N, H, W, C = preds_alpha.shape
+                preds_alpha = preds_alpha.reshape(N*H, W, C)
+                preds_alpha = preds_alpha.detach().cpu().numpy()
 
-                pred = preds[0].detach().cpu().numpy()
+                # pred = preds[0].detach().cpu().numpy()
+                pred = preds.reshape(N*H, W, -1)
+                pred = pred.detach().cpu().numpy()
+
                 #pred = (pred * 255).astype(np.uint8)
                 pred = ((pred * preds_alpha + (1 - preds_alpha)) * 255).astype(np.uint8)
 
-                pred_norm = preds_norm[0].detach().cpu().numpy()
+                # pred_norm = preds_norm[0].detach().cpu().numpy()
+                preds_norm = preds_norm.reshape(N*H, W, -1)
+                pred_norm = preds_norm.detach().cpu().numpy()
                 pred_norm = ((pred_norm * preds_alpha + (1 - preds_alpha)) * 255).astype(np.uint8)
 
-                pred_depth = preds_depth[0].detach().cpu().numpy()
+                pred_depth = preds_depth.reshape(N*H, W, -1)
+                pred_depth = pred_depth.detach().cpu().numpy()
                 pred_depth = (pred_depth -
                               pred_depth.min()) / (pred_depth.max() - pred_depth.min() + 1e-6)
                 pred_depth = (pred_depth * 255).astype(np.uint8)
@@ -823,7 +922,8 @@ class Trainer(object):
                         all_openpose_map.append(openpose_map)
                 if write_image and i % 10 == 0:
                     if isinstance(preds_alpha, torch.Tensor):
-                        preds_alpha = preds_alpha[0].detach().cpu().numpy()
+                        preds_alpha = preds_alpha.detach().cpu().numpy()
+                        preds_alpha = preds_alpha.detach().cpu().numpy()
                     preds_alpha = (preds_alpha * 255).astype(np.uint8)
                     pred = np.concatenate([pred, preds_alpha], axis=-1)
                     pred_norm = np.concatenate([pred_norm, preds_alpha], axis=-1)
@@ -863,6 +963,7 @@ class Trainer(object):
                 quality=8,
                 macro_block_size=1
             )
+            print(all_preds_depth.shape, all_preds_norm.shape)
             imageio.mimwrite(
                 os.path.join(save_path, f'{name}_depth.mp4'),
                 all_preds_depth[:100],
@@ -916,7 +1017,7 @@ class Trainer(object):
         self.local_step = 0
 
         for data in loader:
-
+            
             self.local_step += 1
             self.global_step += 1
 
