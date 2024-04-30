@@ -14,16 +14,17 @@ pretrained_model_name_or_path: ashawkey/mvdream-sd2.1-diffusers
 revision: null
 variant: null
 tokenizer_name: null
+gender: man
 # instance_data_dir: null
 # class_data_dir: null
 # instance_prompt: null
 # class_prompt: null
-instance_data_dir: data/xiu_full
-class_data_dir: data/mv_man_full
+instance_data_dir: data/human/yuliang
+class_data_dir: data/multi_concepts_data/stable-diffusion-2-1-base
 instance_prompt: a high-resolution DSLR colored image of a sks man spreading his arms
 class_prompt: a high-resolution DSLR colored image of a man spreading his arms
 
-with_prior_preservation: false
+with_prior_preservation: true
 prior_loss_weight: 1.0
 num_class_images: 100
 
@@ -34,8 +35,9 @@ train_text_encoder: false
 train_batch_size: 4
 sample_batch_size: 4
 num_train_epochs: 1
-max_train_steps: 2000
-checkpointing_steps: 500
+max_train_steps: 100
+validation_steps: 5000
+checkpointing_steps: 5000
 checkpoints_total_limit: null
 resume_from_checkpoint: null
 gradient_accumulation_steps: 1
@@ -61,7 +63,6 @@ allow_tf32: false
 report_to: tensorboard
 validation_prompt: ${instance_prompt}
 num_validation_images: 4
-validation_steps: 100
 mixed_precision: null
 prior_generation_precision: null
 local_rank: -1

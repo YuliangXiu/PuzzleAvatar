@@ -329,9 +329,9 @@ class Renderer(nn.Module):
         h, w = self.mesh.albedo.shape[:2]
         uv = self.mesh.vt * 2.0 - 1.0
         uv = torch.cat((uv, torch.zeros_like(uv[..., :1]), torch.ones_like(uv[..., :1])), dim=-1)
-        print(uv.shape, self.mesh.ft.shape, h, w)
+        print(uv.shape, self.mesh.ft.shape, self.mesh.ft.type(), h, w)
         rast, rastdb = dr.rasterize(
-            self.glctx, uv.unsqueeze(0), self.mesh.ft, (h, w)
+            self.glctx, uv.unsqueeze(0), self.mesh.ft.int(), (h, w)
         )    # [1, h, w, 4]
 
         if not self.cfg.model.use_can_pose_space:

@@ -1,6 +1,6 @@
 #!/bin/bash
-set +x 
-# source ./scripts/env.sh
+# set +x 
+source ./scripts/env.sh
 
 export EXP_DIR=$1
 export SUB_NAME=$2
@@ -16,25 +16,25 @@ export peft_type="none"
 
 python -m cores.main_mc \
  --config configs/tech_mc_geometry_mv.yaml \
- --exp_dir results/${EXP_DIR} \
+ --exp_dir ${EXP_DIR} \
  --data_dir data/${DATA_DIR} \
  --sub_name ${SUB_NAME} \
  --use_peft ${peft_type} \
  --use_shape_description \
- --pretrain output/puzzle_int_noattn/ \
+ --pretrain ${EXP_DIR} \
 
 python -m utils.body_utils.postprocess_mc \
-    --dir results/${EXP_DIR} \
+    --dir ${EXP_DIR} \
     --data_dir data/${DATA_DIR} \
-    --nam${SUB_NAME}$2
+    --name ${SUB_NAME}
 
 # # # rm -rf results/$1/texture
 
 python -m cores.main_mc \
  --config configs/tech_mc_texture_mv.yaml \
- --exp_dir results/${EXP_DIR} \
+ --exp_dir ${EXP_DIR} \
  --data_dir data/${DATA_DIR} \
  --sub_name ${SUB_NAME} \
  --use_peft ${peft_type} \
  --use_shape_description \
- --pretrain output/puzzle_int_noattn/
+ --pretrain ${EXP_DIR}

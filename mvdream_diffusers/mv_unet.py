@@ -305,13 +305,13 @@ class MemoryEfficientCrossAttention(nn.Module):
         # We use the AttnProcessor2_0 by default when torch 2.x is used which uses
         # torch.nn.functional.scaled_dot_product_attention for native Flash/memory_efficient_attention
         # but only if it has the default `scale` argument. TODO remove scale_qk check when we move to torch 2.1
-        # if processor is None:
-        #     processor = (
-        #         AttnProcessor2_0()
-        #         if hasattr(F, "scaled_dot_product_attention") and self.scale_qk
-        #         else AttnProcessor()
-        #     )
-        # self.set_processor(processor)
+        if processor is None:
+            processor = (
+                AttnProcessor2_0()
+                if hasattr(F, "scaled_dot_product_attention") and self.scale_qk
+                else AttnProcessor()
+            )
+        self.set_processor(processor)
 
 
     def forward(self, x, context=None, attention_mask=None,  **cross_attention_kwargs):

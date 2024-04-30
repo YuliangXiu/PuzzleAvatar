@@ -62,10 +62,10 @@ python -m multi_concept_mv.train_puzzlebooth \
 
 # # Step 2: Run multi-concept DreamBooth inference
 # rm -rf ${EXP_DIR}/output
-python -m multi_concept_mv.inference \
-  --pretrained_model_name_or_path $BASE_MODEL \
-  --model_dir ${EXP_DIR} \
-  --instance_dir ${INPUT_DIR} \
-  --num_samples 10 \
-  --use_peft ${peft_type} \
-  --use_shape_description \
+# python -m multi_concept_mv.inference \
+#   --pretrained_model_name_or_path $BASE_MODEL \
+#   --model_dir ${EXP_DIR} \
+#   --instance_dir ${INPUT_DIR} \
+#   --num_samples 10 \
+#   --use_peft ${peft_type} \
+#   --use_shape_description \

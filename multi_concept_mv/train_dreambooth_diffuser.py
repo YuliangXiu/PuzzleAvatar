@@ -18,12 +18,14 @@ import sys
 sys.path.append('./mvdream_diffusers/')
 import argparse
 import copy
+import glob
 import gc
 import importlib
 import itertools
 import logging
 import math
 import os
+import json
 import os.path as osp
 import shutil
 import warnings
@@ -54,7 +56,7 @@ from diffusers.utils.torch_utils import is_compiled_module
 from huggingface_hub import model_info
 from huggingface_hub.utils import insecure_hashlib
 from hydra import main
-from mpi_utils.mpi_submit import slurm_engine
+# from mpi_utils.mpi_submit import slurm_engine
 from packaging import version
 from PIL import Image
 from PIL.ImageOps import exif_transpose
@@ -70,7 +72,7 @@ if is_wandb_available():
     import wandb
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.28.0.dev0")
+# check_min_version("0.28.0.dev0")
 
 logger = get_logger(__name__)
 
@@ -325,7 +327,7 @@ class DreamBoothDataset(Dataset):
                 f"Instance {self.instance_data_root} images root doesn't exists."
             )
 
-        self.instance_images_path = list(Path(instance_data_root).iterdir())
+        self.instance_images_path = sorted(glob.glob(f"{instance_data_root}/image/*[!raw].jpg"))
         self.num_instance_images = len(self.instance_images_path)
         self.instance_prompt = instance_prompt
         self._length = self.num_instance_images
@@ -333,7 +335,10 @@ class DreamBoothDataset(Dataset):
         if class_data_root is not None:
             self.class_data_root = Path(class_data_root)
             self.class_data_root.mkdir(parents=True, exist_ok=True)
-            self.class_images_path = list(self.class_data_root.iterdir())
+            self.class_images_path = [
+                item
+                for item in sorted(list(self.class_data_root.iterdir())) if str(item).endswith(".jpg")
+            ]
             if class_num is not None:
                 self.num_class_images = min(len(self.class_images_path), class_num)
             else:
@@ -509,7 +514,7 @@ def encode_prompt(
 
 
 @main("configs", config_name="xiu_full", version_base=None)
-@slurm_engine()
+# @slurm_engine()
 def main_train(args):
     args = parse_args(args)
 
@@ -518,6 +523,14 @@ def main_train(args):
             "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
             " Please use `huggingface-cli login` to authenticate with the Hub."
         )
+        
+    with open(os.path.join(args.instance_data_dir, 'gpt4v_simple.json'), 'r') as f:
+        gpt4v_response = json.load(f)
+    args.gender = 'man' if gpt4v_response['gender'] in ['man', 'male'] else 'woman'
+    
+    args.instance_prompt = args.instance_prompt.replace("man", args.gender)
+    args.class_prompt = args.class_prompt.replace("man", args.gender)
+    args.class_data_dir = os.path.join(args.class_data_dir, args.gender)
 
     logging_dir = Path(args.output_dir, args.logging_dir)
 
@@ -579,7 +592,7 @@ def main_train(args):
         if not class_images_dir.exists():
             class_images_dir.mkdir(parents=True)
         cur_class_images = len(list(class_images_dir.iterdir()))
-
+        
         if cur_class_images < args.num_class_images:
             torch_dtype = (
                 torch.float16 if accelerator.device.type == "cuda" else torch.float32
@@ -942,7 +955,8 @@ def main_train(args):
         # accelerator.init_trackers("dreambooth", config=tracker_config)
         if args.report_to == "wandb":
             os.makedirs(osp.join(args.output_dir, "wandb"), exist_ok=True)
-            wandb.login(key="8e99ff14eba9677d715999d7a282c9ff79cfb9bf")
+            # wandb.login(key="8e99ff14eba9677d715999d7a282c9ff79cfb9bf")
+            
         accelerator.init_trackers(
             f"mvdb_{osp.dirname(args.expname)}",
             dict(args),
@@ -950,6 +964,7 @@ def main_train(args):
                 "wandb": {
                     "dir": args.output_dir,
                     "name": "/".join(args.expname.split("/")[1:]),
+                    "mode": "offline",
                 }
             },
         )
@@ -1081,7 +1096,7 @@ def main_train(args):
                     class_labels=class_labels,
                     return_dict=False,
                 )
-                print(model_pred.shape)
+                # print(model_pred.shape)
 
                 if model_pred.shape[1] == 6:
                     model_pred, _ = torch.chunk(model_pred, 2, dim=1)

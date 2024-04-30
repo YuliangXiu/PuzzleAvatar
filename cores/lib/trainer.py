@@ -27,6 +27,8 @@ from .loss_utils import *
 
 import os.path as osp
 from jutils import image_utils
+
+
 def scale_for_lpips(image_tensor):
     return image_tensor * 2. - 1.
 
@@ -38,7 +40,9 @@ def seed_everything(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
+
 div = 0
+
 
 class Trainer(object):
     def __init__(
@@ -55,7 +59,7 @@ class Trainer(object):
         local_rank=0,    # which GPU am I
         world_size=1,    # total num of GPUs
         device=None,    # device to use, usually setting to None is OK. (auto choose device)
-        mute=False,    # whether to mute all print
+        mute=True,    # whether to mute all print
         fp16=False,    # amp optimize level
         eval_interval=1,    # eval once every $ epoch
         max_keep_ckpt=2,    # max num of saved ckpts in disk
@@ -455,7 +459,7 @@ class Trainer(object):
     def log(self, *args, **kwargs):
         if self.local_rank == 0:
             if not self.mute:
-                #print(*args)
+                # print(*args)
                 self.console.print(*args, **kwargs)
             if self.log_ptr:
                 print(*args, file=self.log_ptr)
@@ -541,11 +545,12 @@ class Trainer(object):
             text_z = self.text_z
             text_z_novd = self.text_z
 
-        debug = self.global_step % 250 == 0 or self.global_step == 1
+        debug = self.global_step % 5000 == 0 or self.global_step == 1
         NF, B = text_z.shape[:2]
         # print('face normal', self.face_normal_text_z.shape)
-        text_z = text_z.transpose(0, 1).reshape(B*NF, *text_z.shape[-2:])
-        text_z_novd = text_z_novd.unsqueeze(1).repeat(1, NF, 1, 1).reshape(B*NF, *text_z_novd.shape[-2:])
+        text_z = text_z.transpose(0, 1).reshape(B * NF, *text_z.shape[-2:])
+        text_z_novd = text_z_novd.unsqueeze(1).repeat(1, NF, 1,
+                                                      1).reshape(B * NF, *text_z_novd.shape[-2:])
         # torch.Size([3, 4, 77, 1024]) torch.Size([3, 77, 1024]) torch.Size([4, 3, 512, 512]) torch.Size([4, 4, 4]) torch.Size([4, 16])
         # print('guidance', text_z.shape, text_z_novd.shape, pred_rgb.shape, data['poses'].shape, data['camera'].shape)
         guidance_loss, guidance_rtn = self.guidance.train_step(
@@ -559,39 +564,48 @@ class Trainer(object):
             is_face=is_face,
             cur_epoch=self.epoch,
             stage=self.stage,
-            camera=data['camera'], # (4, 16)
+            camera=data['camera'],    # (4, 16)
             debug=debug,
         )
-        # print(guidance_loss)
+        
         if debug:
-            img_list = [guidance_rtn['orig'], guidance_rtn['1-step'],]
+            img_list = [
+                guidance_rtn['orig'],
+                guidance_rtn['1-step'],
+            ]
             if 'multi-step' in guidance_rtn:
                 img_list += [guidance_rtn['multi-step']]
             img_save = torch.cat(img_list, dim=0)
             N = len(guidance_rtn['1-step'])
             # print(osp.join(self.workspace, 'visualize', f'{self.global_step:04d}_guidance'))
             image_utils.save_images(
-                img_save, 
-                osp.join(self.workspace, 'visualize', f'{self.global_step:04d}_guidance'), 
-                col=N)
-            image_utils.save_images(pred_rgb, osp.join(self.workspace, 'visualize', f'{self.global_step:04d}_render'))
+                img_save,
+                osp.join(self.workspace, 'visualize', f'{self.global_step:04d}_guidance'),
+                col=N
+            )
+            image_utils.save_images(
+                pred_rgb, osp.join(self.workspace, 'visualize', f'{self.global_step:04d}_render')
+            )
 
             device = self.device
             name = 'prompt2img'
             i = self.global_step
             save_path = os.path.join(self.workspace, 'visualize')
-            _, images, rtn = self.guidance.prompt_to_img([self.cfg.guidance.text],
-                                    [self.cfg.guidance.negative], 
-                                    self.guidance.res, self.guidance.res,
-                                    num_inference_steps=50,
-                                    latents=torch.randn([4, 4, 32, 32], device=device),
-                                    guidance_scale=5,
-                                    camera=data['camera'],) # (4, 16)
-        
+            _, images, rtn = self.guidance.prompt_to_img(
+                [self.cfg.guidance.text],
+                [self.cfg.guidance.negative],
+                self.guidance.res,
+                self.guidance.res,
+                num_inference_steps=50,
+                latents=torch.randn([4, 4, 32, 32], device=device),
+                guidance_scale=5,
+                camera=data['camera'],
+            )    # (4, 16)
+
             # print(self.cfg.guidance.text)
             print(osp.join(save_path, f'{name}_{i:04d}_prompt'))
             image_utils.save_images(images, osp.join(save_path, f'{name}_{i:04d}_prompt'))
-            
+
         loss += guidance_loss
         loss_dict['guidance_loss'] = f"{guidance_loss.item():.5f}"
 
@@ -613,7 +627,7 @@ class Trainer(object):
                 loss_dict['depth_loss'] = f"{eikonal_loss.item() * self.cfg.train.lambda_eik:.5f}"
 
         # if verbose:
-        pprint.pprint(loss_dict)
+        # pprint.pprint(loss_dict)
 
         if self.cfg.train.tet_subdiv_steps is not None \
             and len(self.cfg.train.tet_subdiv_steps) > 1 and \
@@ -838,7 +852,8 @@ class Trainer(object):
         # save front image for comparison
         if "PuzzleIOI" in save_path:
             from shutil import copyfile
-            subject, outfit = save_path.split("/")[3:5]
+            start_idx = save_path.split("/").index("puzzle_cam")
+            subject, outfit = save_path.split("/")[start_idx + 1:start_idx + 3]
             src_front_image = os.path.join(
                 "data", "PuzzleIOI", "fitting", subject, outfit, "images", "07_C.jpg"
             )
@@ -853,13 +868,13 @@ class Trainer(object):
             for i, data in enumerate(loader):
                 # device = data['camera'].device
                 # _, images, rtn = self.guidance.prompt_to_img([self.cfg.guidance.text],
-                #                         [self.cfg.guidance.negative], 
+                #                         [self.cfg.guidance.negative],
                 #                         self.guidance.res, self.guidance.res,
                 #                         num_inference_steps=50,
                 #                         latents=torch.randn([4, 4, 32, 32], device=device),
                 #                         guidance_scale=5,
                 #                         camera=data['camera'],) # (4, 16)
-            
+
                 # print(self.cfg.guidance.text)
                 # print(osp.join(save_path, f'{name}_{i:04d}_prompt'))
                 # image_utils.save_images(images, osp.join(save_path, f'{name}_{i:04d}_prompt'))
@@ -890,22 +905,22 @@ class Trainer(object):
                     mesh = pred_mesh
                 # preds_alpha = preds_alpha[0].detach().cpu().numpy()
                 N, H, W, C = preds_alpha.shape
-                preds_alpha = preds_alpha.reshape(N*H, W, C)
+                preds_alpha = preds_alpha.reshape(N * H, W, C)
                 preds_alpha = preds_alpha.detach().cpu().numpy()
 
                 # pred = preds[0].detach().cpu().numpy()
-                pred = preds.reshape(N*H, W, -1)
+                pred = preds.reshape(N * H, W, -1)
                 pred = pred.detach().cpu().numpy()
 
                 #pred = (pred * 255).astype(np.uint8)
                 pred = ((pred * preds_alpha + (1 - preds_alpha)) * 255).astype(np.uint8)
 
                 # pred_norm = preds_norm[0].detach().cpu().numpy()
-                preds_norm = preds_norm.reshape(N*H, W, -1)
+                preds_norm = preds_norm.reshape(N * H, W, -1)
                 pred_norm = preds_norm.detach().cpu().numpy()
                 pred_norm = ((pred_norm * preds_alpha + (1 - preds_alpha)) * 255).astype(np.uint8)
 
-                pred_depth = preds_depth.reshape(N*H, W, -1)
+                pred_depth = preds_depth.reshape(N * H, W, -1)
                 pred_depth = pred_depth.detach().cpu().numpy()
                 pred_depth = (pred_depth -
                               pred_depth.min()) / (pred_depth.max() - pred_depth.min() + 1e-6)
@@ -963,7 +978,7 @@ class Trainer(object):
                 quality=8,
                 macro_block_size=1
             )
-            print(all_preds_depth.shape, all_preds_norm.shape)
+            # print(all_preds_depth.shape, all_preds_norm.shape)
             imageio.mimwrite(
                 os.path.join(save_path, f'{name}_depth.mp4'),
                 all_preds_depth[:100],
@@ -1017,7 +1032,7 @@ class Trainer(object):
         self.local_step = 0
 
         for data in loader:
-            
+
             self.local_step += 1
             self.global_step += 1
 
