@@ -37,6 +37,7 @@ if __name__ == "__main__":
         #         failed_sds.append(subject)
                 
         if not os.path.exists(os.path.join(subject, "img_logs/05000_step_raw_attn.jpg")):
+        # if not os.path.exists(os.path.join(subject, "unet/config.json")):
             failed_sd.append(subject)
         else: 
             if not os.path.exists(os.path.join(subject, "texture/visualize/texture_ep0100_rgb.mp4")):
@@ -45,9 +46,13 @@ if __name__ == "__main__":
     print("Failed SD: ", len(failed_sd))
     print("Failed SDS: ", len(failed_sds))
 
-
-    lst_to_file(failed_sd, f"./clusters/lst/failed_sd_{args.tag}.txt")
-    lst_to_file(failed_sds, f"./clusters/lst/failed_sds_{args.tag}.txt")
+    if args.tag == 'mvdream':
+        lst_to_file(failed_sd, f"../PuzzleMV/clusters/failed_sd_{args.tag}.txt")
+        lst_to_file(failed_sds, f"../PuzzleMV/clusters/failed_sds_{args.tag}.txt")
+    else:
+        lst_to_file(failed_sd, f"./clusters/lst/failed_sd_{args.tag}.txt")
+        lst_to_file(failed_sds, f"./clusters/lst/failed_sds_{args.tag}.txt")
+    
             
 
 

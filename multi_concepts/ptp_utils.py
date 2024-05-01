@@ -24,6 +24,51 @@ import torch.nn.functional as nnf
 from PIL import Image
 
 
+class P2PCrossAttnProcessor:
+    def __init__(self, controller, place_in_unet):
+        super().__init__()
+        self.controller = controller
+        self.place_in_unet = place_in_unet
+
+    def __call__(
+        self,
+        attn: Attention,
+        hidden_states,
+        encoder_hidden_states=None,
+        attention_mask=None,
+    ):
+        batch_size, sequence_length, _ = hidden_states.shape
+        attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+
+        query = attn.to_q(hidden_states)
+
+        is_cross = encoder_hidden_states is not None
+        encoder_hidden_states = (
+            encoder_hidden_states if encoder_hidden_states is not None else hidden_states
+        )
+        key = attn.to_k(encoder_hidden_states)
+        value = attn.to_v(encoder_hidden_states)
+
+        query = attn.head_to_batch_dim(query)
+        key = attn.head_to_batch_dim(key)
+        value = attn.head_to_batch_dim(value)
+
+        attention_probs = attn.get_attention_scores(query, key, attention_mask)
+
+        # one line change
+        self.controller(attention_probs, is_cross, self.place_in_unet)
+
+        hidden_states = torch.bmm(attention_probs, value)
+        hidden_states = attn.batch_to_head_dim(hidden_states)
+
+        # linear proj
+        hidden_states = attn.to_out[0](hidden_states)
+        # dropout
+        hidden_states = attn.to_out[1](hidden_states)
+
+        return hidden_states
+
+
 def text_under_image(
     image: np.ndarray, text: str, text_color: Tuple[int, int, int] = (0, 0, 0)
 ) -> np.ndarray:
@@ -94,10 +139,9 @@ class AttentionControl(abc.ABC):
         raise NotImplementedError
 
     def __call__(self, attn, is_cross: bool, place_in_unet: str):
-        
-        
+
         attn_ = self.forward(attn, is_cross, place_in_unet)
-        
+
         self.cur_att_layer += 1
         if self.cur_att_layer == self.num_att_layers:
             self.cur_att_layer = 0
