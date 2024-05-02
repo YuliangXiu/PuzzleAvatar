@@ -216,10 +216,12 @@ def gpt4v_captioning(img_dir):
         res = (256, 256)
     else:
         used_lst = random.sample(os.listdir(img_dir), 3)
+        prompt = open("./multi_concepts/gpt4v_simple.txt", "r").read()
+        res = (600, 800)
     images = [encode_image(os.path.join(img_dir, img_name), res=res) for img_name in used_lst]
 
     payload = {
-        "model": "gpt-4-vision-preview", "messages":
+        "model": "gpt-4-turbo", "messages":
         [{"role": "user", "content": [
             {"type": "text", "text": prompt},
         ]}], "max_tokens": 500
@@ -300,8 +302,11 @@ if __name__ == '__main__':
     sam = sam_model_registry[SAM_ENCODER_VERSION](checkpoint=SAM_CHECKPOINT_PATH).to(device=DEVICE)
     sam_predictor = SamPredictor(sam)
 
-    BOX_TRESHOLD = 0.30
-    TEXT_TRESHOLD = 0.40
+    # BOX_TRESHOLD = 0.30
+    # TEXT_TRESHOLD = 0.40
+    
+    BOX_TRESHOLD = 0.20
+    TEXT_TRESHOLD = 0.20
 
     try:
         json_path = f"{opt.out_dir}/{gpt_filename}"

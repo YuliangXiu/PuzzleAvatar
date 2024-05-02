@@ -107,7 +107,7 @@ def getSHCoeffs(order, phi, theta):
     return np.stack(shs, 1)
 
 
-def computePRT(mesh_path, scale, n, order):
+def computePRT(mesh_path, scale, n, order, overwrite=False):
 
     prt_dir = os.path.join(os.path.dirname(mesh_path), "prt")
     bounce_path = os.path.join(prt_dir, "bounce.npy")
@@ -118,7 +118,7 @@ def computePRT(mesh_path, scale, n, order):
     PRT = None
     F = None
 
-    if os.path.exists(bounce_path) and os.path.exists(face_path):
+    if os.path.exists(bounce_path) and os.path.exists(face_path) and not overwrite:
     # if False:
 
         PRT = np.load(bounce_path)

@@ -22,7 +22,7 @@ numba.config.THREADING_LAYER = 'workqueue'
 sys.path.append(os.path.join(os.getcwd()))
 
 
-def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag):
+def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag, head):
 
     initialize_GL_context(width=size, height=size, egl=egl)
 
@@ -65,7 +65,7 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag):
     vmed = 0.5 * (vmax + vmin)
     # vmed[[0, 2]] *= 0.
 
-    prt, face_prt = prt_util.computePRT(mesh_file, scale, 10, 2)
+    prt, face_prt = prt_util.computePRT(mesh_file, scale, 10, 2, overwrite)
     rndr = PRTRender(width=size, height=size, ms_rate=16, egl=egl)
 
     # texture
@@ -87,7 +87,11 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag):
 
     for y in range(0, 360, 360 // rotation):
 
-        cam.ortho_ratio = (512 / size) * 0.4
+        if head:
+            cam.ortho_ratio = (512 / size) * 0.4 * 0.4
+            cam.center[up_axis] = 0.8 * scale
+        else:
+            cam.ortho_ratio = (512 / size) * 0.4
 
         R = opengl_util.make_rotate(0, math.radians(y), 0)
 
@@ -104,12 +108,12 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag):
         rgb_path = os.path.join(
             save_folder,
             "/".join(subject.split("/")[idx + 1:]).replace("puzzle_cam", f"puzzle_cam_{tag}"),
-            'render', f'{y:03d}.png'
+            'render_head' if head else 'render', f'{y:03d}.png'
         )
         norm_path = os.path.join(
             save_folder,
             "/".join(subject.split("/")[idx + 1:]).replace("puzzle_cam", f"puzzle_cam_{tag}"),
-            'normal', f'{y:03d}.png'
+            'normal_head' if head else 'normal', f'{y:03d}.png'
         )
 
         if overwrite or (not os.path.exists(rgb_path)):
@@ -140,6 +144,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '-split', '--split', type=str, default="all", help='split the rendering into parts'
     )
+    parser.add_argument('-head', '--head', action="store_true", help='head rendering mode')
     args = parser.parse_args()
 
     # rendering setup
@@ -186,6 +191,7 @@ if __name__ == "__main__":
                     egl=args.headless,
                     overwrite=args.overwrite,
                     tag=args.tag,
+                    head=args.head,
                 ),
                 subjects,
             ),

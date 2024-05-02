@@ -41,7 +41,6 @@ from diffusers import (
     UNet2DConditionModel,
 )
 from transformers import AutoTokenizer
-from diffusers.models.attention_processor import Attention
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
@@ -414,6 +413,8 @@ class SpatialDreambooth:
             center_crop=self.args.center_crop,
             sd_version=self.args.pretrained_model_name_or_path.split("/")[-1],
             use_view_prompt=self.args.use_view_prompt,
+            use_full_shot=self.args.use_full_shot,
+            use_half_data=self.args.use_half_data,
         )
 
         prompt_dict = train_dataset.construct_prompt(

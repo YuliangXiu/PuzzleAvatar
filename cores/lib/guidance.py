@@ -55,7 +55,8 @@ class StableDiffusion(nn.Module):
         controlnet=None,
         lora=None,
         cfg=None,
-        head_hf_key=None
+        head_hf_key=None,
+        use_sds=False,
     ):
         super().__init__()
         self.cfg = cfg
@@ -68,6 +69,7 @@ class StableDiffusion(nn.Module):
         self.sd_step_range = sd_step_range
         self.subdiv_step = subdiv_step
         self.iters = iters
+        self.use_sds = use_sds
 
         print(f'[INFO] loading stable diffusion...')
 
@@ -293,33 +295,28 @@ class StableDiffusion(nn.Module):
             ) + noise_pred * torch.cat([alpha_t] * 3, dim=0).view(-1, 1, 1, 1)
 
         noise_pred_neg, noise_pred_text, noise_pred_null = noise_pred.chunk(3)
+        
+        if not self.use_sds:
 
-        # vanilla sds: w(t), sigma_t^2
-        w = (1 - self.alphas[t])
+            # vanilla sds: w(t), sigma_t^2
+            w = (1 - self.alphas[t])
 
-        # # fantasia3d
-        # if stage == "geometry":
-        #     if cur_epoch <= 1000:
-        #         w = (1 - self.alphas[t])
-        #     else:
-        #         w = (self.alphas[t]**0.5 * (1 - self.alphas[t]))
-        # elif stage == "texture":
-        #     if cur_epoch <= 1000:
-        #         w = (self.alphas[t]**0.5 * (1 - self.alphas[t]))
-        #     else:
-        #         w = 1 / (1 - self.alphas[t])
+            # updated version inspired by HumanGuassian (https://arxiv.org/abs/2311.17061) and NFSD (https://arxiv.org/abs/2310.17590)
 
-        # original version from DreamFusion (https://dreamfusion3d.github.io/)
-        # noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
+            classifier_pred = guidance_scale * (noise_pred_text - noise_pred_null)
 
-        # updated version inspired by HumanGuassian (https://arxiv.org/abs/2311.17061) and NFSD (https://arxiv.org/abs/2310.17590)
+            mask = (t < 200).int().view(-1, 1, 1, 1)
+            negative_pred = mask * noise_pred_null + (1 - mask) * (noise_pred_null - noise_pred_neg)
 
-        classifier_pred = guidance_scale * (noise_pred_text - noise_pred_null)
-
-        mask = (t < 200).int().view(-1, 1, 1, 1)
-        negative_pred = mask * noise_pred_null + (1 - mask) * (noise_pred_null - noise_pred_neg)
-
-        grad = w.view(-1, 1, 1, 1) * (classifier_pred + negative_pred)
+            grad = w.view(-1, 1, 1, 1) * (classifier_pred + negative_pred)
+        else:
+            # original version from DreamFusion (https://dreamfusion3d.github.io/)
+            noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_null)
+            # w(t), sigma_t^2
+            w = (1 - self.alphas[t])
+            # w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
+            grad = w * (noise_pred - noise)
+            
 
         grad_norm = torch.norm(grad, dim=-1, keepdim=True) + 1e-8
         grad = grad_norm.clamp(max=0.1) * grad / grad_norm

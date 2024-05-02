@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import hashlib
 import itertools
 import logging
 import math
@@ -41,7 +40,6 @@ from diffusers import (
     UNet2DConditionModel,
 )
 from transformers import AutoTokenizer
-from diffusers.models.attention_processor import Attention
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
@@ -50,14 +48,12 @@ from ptp_utils import AttentionStore, P2PCrossAttnProcessor
 from tqdm.auto import tqdm
 from train_utils import (
     import_model_class_from_model_name_or_path,
-    parse_args,
+    parse_args_multi,
     clean_decode_prompt,
 )
 from dataset import (
-    DreamBoothDataset,
-    PromptDataset,
+    MultiDreamBoothDataset,
     collate_fn,
-    construct_prior_prompt,
 )
 
 import wandb
@@ -86,10 +82,12 @@ negative_prompt = 'unrealistic, blurry, low quality, out of focus, ugly, low con
 
 class SpatialDreambooth:
     def __init__(self):
-        self.args, self.gpt4v_response = parse_args()
-        self.attn_mask_cache = {}
+        self.args, self.gpt4v_response, self.so_map_lst = parse_args_multi()
         self.class_ids = []
-        self.save_attn_mask_cache = False
+        
+        self.all_class_tokens = []
+        for so_name in self.gpt4v_response.keys():
+            self.all_class_tokens.append(self.gpt4v_response[so_name].keys())
         if 'base' in self.args.pretrained_model_name_or_path:
             self.attn_res = 16
             self.mask_res = 64
@@ -107,18 +105,8 @@ class SpatialDreambooth:
         self.accelerator = Accelerator(
             gradient_accumulation_steps=self.args.gradient_accumulation_steps,
             mixed_precision=self.args.mixed_precision,
-            log_with=self.args.report_to,
             project_dir=logging_dir,
         )
-
-        if self.args.report_to == "wandb":
-
-            wandb_init = {
-                "wandb": {
-                    "name": self.args.project_name,
-                    "mode": self.args.wandb_mode,
-                }
-            }
 
         if (
             self.args.train_text_encoder and self.args.gradient_accumulation_steps > 1 and
@@ -291,118 +279,11 @@ class SpatialDreambooth:
         self.controller = AttentionStore()
         self.register_attention_control(self.controller)
 
-        pretrained_name = self.args.pretrained_model_name_or_path.split("/")[-1]
-        cached_masks_path = Path(
-            self.args.class_data_dir, f"{pretrained_name}/{self.args.gender}/attn_masks_cache.pt"
-        )
-
-        # Generate class images if prior preservation is enabled.
-        with torch.no_grad():
-            if self.args.with_prior_preservation:
-
-                if cached_masks_path.exists():
-                    self.attn_mask_cache = torch.load(cached_masks_path)
-                else:
-
-                    # generate attn_mask_cache file
-                    pipeline = DiffusionPipeline.from_pretrained(
-                        self.args.pretrained_model_name_or_path,
-                        torch_dtype=self.weight_dtype,
-                        safety_checker=None,
-                        revision=self.args.revision,
-                    )
-                    self.unet.eval()
-                    pipeline.unet = self.unet
-                    # pipeline.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
-                    pipeline.set_progress_bar_config(disable=True)
-                    pipeline.to(self.accelerator.device)
-
-                    for class_name in [self.args.gender]:
-
-                        class_prompt = construct_prior_prompt(
-                            self.args.gender,
-                            self.args.initializer_tokens,
-                            self.gpt4v_response,
-                            self.args.use_shape_description,
-                        )
-
-                        class_images_dir = Path(
-                            self.args.class_data_dir
-                        ) / pretrained_name / class_name
-
-                        if not class_images_dir.exists():
-                            class_images_dir.mkdir(parents=True)
-                        cur_class_images = len(list(class_images_dir.iterdir()))
-
-                        if cur_class_images < self.args.num_class_images:
-
-                            num_new_images = self.args.num_class_images - cur_class_images
-                            logger.info(f"Number of class images to sample: {num_new_images}.")
-
-                            sample_dataset = PromptDataset(
-                                self.tokenizer, class_prompt, num_new_images
-                            )
-                            sample_dataloader = torch.utils.data.DataLoader(
-                                sample_dataset, batch_size=self.args.sample_batch_size
-                            )
-
-                            sample_dataloader = self.accelerator.prepare(sample_dataloader)
-
-                            for example in tqdm(
-                                sample_dataloader,
-                                desc=f"Generating {class_name} images",
-                                disable=not self.accelerator.is_local_main_process,
-                            ):
-
-                                images = pipeline(
-                                    example["prompt"],
-                                    negative_prompt=[negative_prompt] * len(example["prompt"])
-                                ).images
-
-                                for batch_idx in range(self.args.sample_batch_size):
-
-                                    hash_image = hashlib.sha1(images[batch_idx].tobytes()
-                                                             ).hexdigest()
-                                    base_name = f"{example['index'][batch_idx] + cur_class_images}-{hash_image}.jpg"
-                                    image_filename = (class_images_dir / base_name)
-                                    images[batch_idx].save(image_filename)
-                                    self.attn_mask_cache[base_name] = {}
-
-                                    agg_attn_pre = self.aggregate_attention(
-                                        res=self.attn_res,
-                                        from_where=("up", "down"),
-                                        is_cross=True,
-                                        select=batch_idx,
-                                        batch_size=self.args.sample_batch_size,
-                                    )
-
-                                    for class_token_id in self.class_ids:
-
-                                        # agg_attn [24,24,77]
-                                        class_idx = ((
-                                            example["prompt_ids"][batch_idx] == class_token_id
-                                        ).nonzero().item())
-
-                                        cls_attn_mask = agg_attn_pre[..., class_idx]
-                                        cls_attn_mask = (cls_attn_mask / cls_attn_mask.max())
-                                        self.attn_mask_cache[base_name][class_token_id
-                                                                       ] = cls_attn_mask
-
-                                self.controller.attention_store = {}
-                                self.controller.cur_step = 0
-
-                    del pipeline
-
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-
-                    torch.save(self.attn_mask_cache, cached_masks_path)
-
-        # Dataset and DataLoaders creation:
-        train_dataset = DreamBoothDataset(
-            instance_data_root=self.args.instance_data_dir,
+        # Dataset and DataLoaders creation
+        train_dataset = MultiDreamBoothDataset(
             placeholder_tokens=self.placeholder_tokens,
             initializer_tokens=self.args.initializer_tokens,
+            so_map_lst=self.so_map_lst,
             gpt4v_response=self.gpt4v_response,
             use_shape_desc=self.args.use_shape_description,
             with_prior_preservation=self.args.with_prior_preservation,
@@ -417,10 +298,13 @@ class SpatialDreambooth:
         )
 
         prompt_dict = train_dataset.construct_prompt(
-            self.args.initializer_tokens, self.placeholder_tokens,
-            [self.gpt4v_response[cls_name] for cls_name in self.args.initializer_tokens], []
+            classes_to_use=train_dataset.cur_initializer,
+            tokens_to_use=train_dataset.cur_placeholder,
+            descs_to_use=[],
+            views_to_use=[],
+            gender_to_use=train_dataset.cur_gender,
         )
-
+        
         self.args.instance_prompt = prompt_dict["prompt"]
         self.args.instance_prompt_raw = prompt_dict["prompt_raw"]
 
@@ -496,9 +380,7 @@ class SpatialDreambooth:
         # We need to initialize the trackers we use, and also store our configuration.
         # The trackers initializes automatically on the main process.
         if self.accelerator.is_main_process:
-            self.accelerator.init_trackers(
-                "multi-concepts", config=vars(self.args), init_kwargs=wandb_init
-            )
+            self.accelerator.init_trackers("multi-concepts", config=vars(self.args))
 
         # Train
         total_batch_size = (
@@ -518,6 +400,7 @@ class SpatialDreambooth:
         logger.info(f"  Total optimization steps = {self.args.max_train_steps}")
         global_step = 0
         first_epoch = 0
+        
 
         # Potentially load in the weights and states from a previous save
         if self.args.resume_from_checkpoint:
@@ -755,8 +638,6 @@ class SpatialDreambooth:
                     # Attention loss
                     if self.args.lambda_attention != 0:
                         attn_loss = 0
-                        cls_masks = []
-                        cls_masks_gt = []
 
                         for batch_idx in range(self.args.train_batch_size):
 
@@ -769,15 +650,6 @@ class SpatialDreambooth:
                                 curr_cond_batch_idx = self.args.train_batch_size * (
                                     bsz - 1
                                 ) + batch_idx
-
-                                agg_attn_prior = self.aggregate_attention(
-                                    res=self.attn_res,
-                                    from_where=("up", "down"),
-                                    is_cross=True,
-                                    select=batch_idx,
-                                    batch_size=self.args.train_batch_size * bsz,
-                                    use_half=False,
-                                )
 
                             else:
                                 curr_cond_batch_idx = batch_idx
@@ -792,7 +664,6 @@ class SpatialDreambooth:
                             )
 
                             cls_attn_masks = []
-                            cls_attn_masks_gt = []
 
                             person_filename = batch["person_filenames"][batch_idx]
                             person_filename = clean_decode_prompt(
@@ -803,31 +674,6 @@ class SpatialDreambooth:
 
                                 curr_placeholder_token_id = self.placeholder_token_ids[
                                     batch["token_ids"][batch_idx][mask_id]]
-                                curr_class_token_id = batch["class_ids"][batch_idx][mask_id]
-
-                                if self.args.with_prior_preservation:
-
-                                    # agg_attn [24,24,77]
-                                    class_idx = ((
-                                        batch["input_ids"][batch_idx] == curr_class_token_id
-                                    ).nonzero().item())
-
-                                    cls_attn_mask = agg_attn_prior[..., class_idx]
-                                    cls_attn_mask = (cls_attn_mask / cls_attn_mask.max())
-                                    cls_attn_masks.append(cls_attn_mask)
-
-                                    if self.args.apply_masked_prior:
-                                        # use first infered attn_mask as the groundtruth attn_mask
-                                        if curr_class_token_id.item(
-                                        ) not in self.attn_mask_cache[person_filename].keys():
-                                            self.attn_mask_cache[person_filename][
-                                                curr_class_token_id.item()] = cls_attn_mask.detach()
-                                            self.save_attn_mask_cache = True
-
-                                        cls_attn_masks_gt.append(
-                                            self.attn_mask_cache[person_filename][
-                                                curr_class_token_id.item()]
-                                        )
 
                                 asset_idx = ((
                                     batch["input_ids"][curr_cond_batch_idx] ==
@@ -845,23 +691,7 @@ class SpatialDreambooth:
                                         reduction="mean",
                                     )
 
-                            if self.args.with_prior_preservation:
-
-                                max_cls_mask_all = torch.max(
-                                    torch.stack(cls_attn_masks), dim=0, keepdims=True
-                                ).values
-                                cls_masks.append(max_cls_mask_all)
-
-                                if self.args.apply_masked_prior:
-                                    max_cls_mask_gt_all = torch.max(
-                                        torch.stack(cls_attn_masks_gt), dim=0, keepdims=True
-                                    ).values
-                                    cls_masks_gt.append(max_cls_mask_gt_all)
-
                         if self.args.with_prior_preservation:
-                            cls_mask = F.interpolate(
-                                torch.stack(cls_masks), size=(self.mask_res, self.mask_res)
-                            )
 
                             syn_rgb_loss = F.mse_loss(
                                 syn_pred.float() * downsampled_syn_mask.float(),
@@ -882,22 +712,6 @@ class SpatialDreambooth:
                             loss += syn_rgb_loss + syn_norm_rgb_loss
                             logs["l_syn"] = syn_rgb_loss.detach().item() + syn_norm_rgb_loss.detach(
                             ).item()
-
-                            if self.args.apply_masked_prior:
-                                cls_mask_gt = F.interpolate(
-                                    torch.stack(cls_masks_gt), size=(self.mask_res, self.mask_res)
-                                )
-                                prior_pred = prior_pred * cls_mask_gt
-                                prior_target = prior_target * cls_mask_gt
-
-                                mask_loss = F.mse_loss(
-                                    cls_mask.float(),
-                                    cls_mask_gt.float(),
-                                    reduction="mean",
-                                ) * self.args.mask_loss_weight / self.args.train_batch_size
-
-                                loss += mask_loss
-                                logs["l_mask"] = mask_loss.detach().item()
 
                             prior_rgb_loss = F.mse_loss(
                                 prior_pred.float(),
@@ -968,35 +782,11 @@ class SpatialDreambooth:
                                 ),
                             )
 
-                            self.accelerator.trackers[0].log({
-                                "step_attn":
-                                [wandb.Image(step_attn_vis, caption=f"{last_sentence}")]
-                            })
-
-                            if self.args.with_prior_preservation:
-                                last_sentence = batch["input_ids"][batch_idx]
-                                last_sentence = clean_decode_prompt(last_sentence, self.tokenizer)
-
-                                prior_attn_vis = self.save_cross_attention_vis(
-                                    last_sentence,
-                                    batch_pixels=batch["pixel_values"][batch_idx].detach().cpu(),
-                                    attention_maps=agg_attn_prior.detach().cpu(),
-                                    path=os.path.join(
-                                        img_logs_path, f"{global_step:05}_step_prior_attn.jpg"
-                                    ),
-                                )
-
-                                self.accelerator.trackers[0].log({
-                                    "prior_attn":
-                                    [wandb.Image(prior_attn_vis, caption=f"{last_sentence}")]
-                                })
-
                         self.controller.cur_step = 0
                         self.controller.attention_store = {}
 
                         full_rgb, full_rgb_raw = self.perform_full_inference()
 
-                        vis_dict = {}
 
                         for idx, name in enumerate(["", "_raw"]):
 
@@ -1018,12 +808,6 @@ class SpatialDreambooth:
                                     img_logs_path, f"{global_step:05}_full_attn{name}.jpg"
                                 ),
                             )
-                            vis_dict.update({
-                                f"full_attn{name}":
-                                [wandb.Image(full_attn_vis, caption=f"{cur_prompt}")]
-                            })
-
-                        self.accelerator.trackers[0].log(vis_dict)
 
                         self.controller.cur_step = 0
                         self.controller.attention_store = {}
@@ -1040,15 +824,6 @@ class SpatialDreambooth:
 
         self.accelerator.end_training()
         self.save_adaptor()
-
-        # save again
-        if self.save_attn_mask_cache:
-            existed_masks = torch.load(cached_masks_path)
-            for filename in existed_masks.keys():
-                for mask_id in existed_masks[filename].keys():
-                    if mask_id not in self.attn_mask_cache[filename].keys():
-                        self.attn_mask_cache[filename][mask_id] = existed_masks[filename][mask_id]
-            torch.save(self.attn_mask_cache, cached_masks_path)
 
     def save_adaptor(self, step=""):
 
@@ -1188,11 +963,6 @@ class SpatialDreambooth:
         images = images.detach().cpu().permute(0, 2, 3, 1).numpy()
         images = (images * 255).round().astype("uint8")
 
-        self.accelerator.trackers[0].log({
-            "validation": [wandb.Image(images[0], caption=f"{self.args.instance_prompt}")],
-            "validation_raw": [wandb.Image(images[1], caption=f"{self.args.instance_prompt_raw}")],
-        })
-
         self.unet.train()
         if self.args.train_text_encoder:
             self.text_encoder.train()
@@ -1217,7 +987,7 @@ class SpatialDreambooth:
 
         for i in range(len(tokens)):
             asset_word = self.tokenizer.decode(int(tokens[i]))
-            if ("asset" in asset_word) or (asset_word in self.gpt4v_response.keys()):
+            if ("asset" in asset_word) or (asset_word in self.all_class_tokens):
                 image = attention_maps[:, :, i]
                 image = 255 * image / image.max()
                 image = image.unsqueeze(-1).expand(*image.shape, 3)
@@ -1231,8 +1001,6 @@ class SpatialDreambooth:
         vis.save(path)
 
         return vis
-
-
 
 
 if __name__ == "__main__":

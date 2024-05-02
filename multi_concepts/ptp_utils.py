@@ -22,6 +22,7 @@ import numpy as np
 import torch
 import torch.nn.functional as nnf
 from PIL import Image
+from diffusers.models.attention_processor import Attention
 
 
 class P2PCrossAttnProcessor:

@@ -28,20 +28,35 @@ def load_config(path, default_path=None):
     return cfg
 
 
-def dict_to_prompt(d, use_shape=False):
+def dict_to_prompt(d, use_shape=False, multi_mode=False, so_name=None):
 
     classes = list(d.keys())
     gender = "man" if d['gender'] == "male" else "woman"
     classes.remove("gender")
 
     prompt_head = f"a high-resolution DSLR colored image of a {gender}"
+    
+    placeholders = []
 
-    for key in ["eyeglasses", "sunglasses", "glasses"]:
-        if key in classes:
-            classes.remove(key)
+    if not multi_mode:
 
-    tokens = [f"<asset{i}>" for i in range(len(classes))]
-    descs = [d[key] for key in classes]
+        for key in ["eyeglasses", "sunglasses", "glasses"]:
+            if key in classes:
+                classes.remove(key)
+
+        tokens = [f"<asset{i}>" for i in range(len(classes))]
+        descs = [d[key] for key in classes]
+        placeholders = tokens
+    else:
+        from glob import glob
+        dict_path = glob(f"./results/multi/*{so_name}*/multi_dict.npy")[0]
+        multi_dict = np.load(dict_path, allow_pickle=True).item()
+        so_data = multi_dict[so_name]
+        classes = so_data["classes"]
+        tokens = so_data["tokens"]
+        descs = so_data["descs"]
+        for key in multi_dict.keys():
+            placeholders += multi_dict[key]["tokens"]
 
     facial_classes = ['face', 'haircut', 'hair']
     with_classes = [cls for cls in classes if cls in facial_classes]
@@ -83,7 +98,7 @@ def dict_to_prompt(d, use_shape=False):
             else:
                 prompt += f"{tokens[idx]} {class_token}{ending}"
 
-    return d['gender'], prompt, prompt, tokens
+    return d['gender'], prompt, prompt, placeholders
 
 
 # torch.autograd.set_detect_anomaly(True)
@@ -98,6 +113,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_peft', type=str, default="none", help="none/lora/boft")
     parser.add_argument('--test', action="store_true")
     parser.add_argument('--use_shape_description', action="store_true")
+    parser.add_argument('--use_sds', action="store_true")
 
     opt = parser.parse_args()
     cfg = load_config(opt.config, default_path="configs/default.yaml")
@@ -107,19 +123,33 @@ if __name__ == '__main__':
     cfg.exp_root = opt.exp_dir
     cfg.sub_name = opt.sub_name
     cfg.use_peft = opt.use_peft
+    cfg.use_sds = opt.use_sds
+
+    multi_mode = True if "_subjects" in opt.exp_dir else False
 
     if cfg.guidance.use_dreambooth:
-        cfg.guidance.hf_key = opt.exp_dir
+        if multi_mode:
+            if "human" in cfg.exp_root:
+                subjects_lst = np.loadtxt("./clusters/lst/group_char.txt", dtype=str)
+            else:
+                subjects_lst = np.loadtxt("./clusters/lst/group_5.txt", dtype=str)
+            if subjects_lst.shape == ():
+                real_hf_key = subjects_lst.item()
+            else:
+                real_hf_key = [name for name in subjects_lst if opt.sub_name in name][0]
+            cfg.guidance.hf_key = os.path.join("./results/multi", real_hf_key)
+        else:
+            cfg.guidance.hf_key = opt.exp_dir
 
     if cfg.guidance.text is None:
         json_path = os.path.join(
-            "./data", "/".join(opt.exp_dir.split("/")[-4:]), "gpt4v_simple.json"
+            "./data", "/".join(opt.exp_dir.split("/")[2:]), "gpt4v_simple.json"
         )
 
         with open(json_path, 'r') as f:
             gpt4v_response = json.load(f)
             gender, cfg.guidance.text, cfg.guidance.text_head, placeholders = dict_to_prompt(
-                gpt4v_response, opt.use_shape_description
+                gpt4v_response, opt.use_shape_description, multi_mode, cfg.sub_name
             )
 
             print(f"Using prompt: {cfg.guidance.text}")
@@ -127,11 +157,9 @@ if __name__ == '__main__':
 
     # create smplx base meshes wrt gender
 
-    smplx_path = os.path.join(
-        "./data", "/".join(opt.exp_dir.split("/")[-4:]), f"smplx_{gender}.obj"
-    )
+    smplx_path = os.path.join("./data", "/".join(opt.exp_dir.split("/")[2:]), f"smplx_{gender}.obj")
     keypoint_path = os.path.join(
-        "./data", "/".join(opt.exp_dir.split("/")[-4:]), f"smplx_{gender}.npy"
+        "./data", "/".join(opt.exp_dir.split("/")[2:]), f"smplx_{gender}.npy"
     )
 
     cfg.data.last_model = smplx_path
@@ -161,7 +189,7 @@ if __name__ == '__main__':
         if use_puzzle:
 
             smpl_param_path = os.path.join(
-                "./data", "/".join(opt.exp_dir.split("/")[-4:]).replace("puzzle_cam", "fitting"),
+                "./data", "/".join(opt.exp_dir.split("/")[2:]).replace("puzzle_cam", "fitting"),
                 "smplx/smplx.pkl"
             )
             print(f"SMPL pkl path: {smpl_param_path}")
@@ -251,7 +279,8 @@ if __name__ == '__main__':
                 controlnet=cfg.guidance.controlnet,
                 lora=cfg.guidance.lora,
                 cfg=cfg,
-                head_hf_key=cfg.guidance.head_hf_key
+                head_hf_key=cfg.guidance.head_hf_key,
+                use_sds=cfg.use_sds,
             )
             for p in guidance.parameters():
                 p.requires_grad = False

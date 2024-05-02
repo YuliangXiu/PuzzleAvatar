@@ -1,0 +1,51 @@
+exp_root: null
+stage: texture
+model:
+    use_dmtet_network: False
+    use_color_network: True
+    tet_offset_scale: 0.
+    tet_grid_volume: 5e-8
+    tet_num_subdiv: 1
+    render_ssaa: 4
+    use_can_pose_space: False
+train:
+    lock_geo: True
+    h: 512
+    w: 512
+    lr: 0.001
+    iters: 10000
+    normal_sample_ratio: 0.
+    radius_range: [0.7, 1.3]
+    height_range: [-0.4, 0.4]
+    theta_range: [60, 120]
+    phi_diff: 30
+    jitter_pose: False
+    face_sample_ratio: 0.5
+    face_height_range: [0., 0.]
+    face_radius_range: [0.6, 0.5]
+    face_phi_diff: 30
+    face_theta_range: [90, 90]
+    face_phi_range: [-180, 180]
+    lambda_lap: 0.
+    lambda_sil: 0.
+    lambda_normal: 0.
+    lambda_recon: 0.
+    lambda_color_chamfer: 0.
+    color_chamfer_step: 5000
+    crop_for_lpips: true
+test:
+    save_mesh: true
+    save_uv: false
+    test: True
+data:
+    load_input_image: False
+    load_front_normal: False
+    load_back_normal: False
+    load_result_mesh: True
+    load_apose_mesh: False
+    load_occ_mask: False
+guidance:
+    sd_version: 2-1
+    use_view_prompt: True
+    guidance_scale: 7.5
+    step_range: [0.02, 0.98]

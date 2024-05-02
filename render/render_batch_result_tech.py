@@ -22,7 +22,7 @@ numba.config.THREADING_LAYER = 'workqueue'
 sys.path.append(os.path.join(os.getcwd()))
 
 
-def render_subject(subject, save_folder, rotation, size, egl, overwrite):
+def render_subject(subject, save_folder, rotation, size, egl, overwrite, head):
 
     initialize_GL_context(width=size, height=size, egl=egl)
 
@@ -34,7 +34,7 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite):
         tex_file = glob(f"{subject}/obj/*albedo.png")[0]
         smpl_file = glob(f"{subject}/obj/*smpl.npy")[0]
     except:
-        with open("./clusters/error_eval_tech.txt", "a") as f:
+        with open("./clusters/lst/error_eval_tech.txt", "a") as f:
             head = "/".join(subject.split("/")[2:-1])
             f.write(f"{head} {' '.join(head.split('/')[-2:])}\n")
 
@@ -93,7 +93,11 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite):
 
     for y in range(0, 360, 360 // rotation):
 
-        cam.ortho_ratio = (512 / size) * 0.4
+        if not head:
+            cam.ortho_ratio = (512 / size) * 0.4
+        else:
+            cam.ortho_ratio = (512 / size) * 0.4 * 0.4
+            cam.center[up_axis] = 0.8 * scale
 
         R = opengl_util.make_rotate(0, math.radians(y), 0)
 
@@ -106,19 +110,19 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite):
         rndr.display()
 
         rgb_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech_full"), 'render',
-            f'{y:03d}.png'
+            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech_full"),
+            'render_head' if head else 'render', f'{y:03d}.png'
         )
         norm_path = os.path.join(
-            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech_full"), 'normal',
-            f'{y:03d}.png'
+            save_folder, "/".join(subject.split("/")[4:]).replace("fitting", "tech_full"),
+            'normal_head' if head else 'normal', f'{y:03d}.png'
         )
 
         if overwrite or (not os.path.exists(rgb_path)):
             opengl_util.render_result(rndr, 0, rgb_path)
         if overwrite or (not os.path.exists(norm_path)):
             opengl_util.render_result(rndr, 1, norm_path)
-
+            
     # ==================================================================
 
 
@@ -138,6 +142,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '-overwrite', '--overwrite', action="store_true", help='overwrite existing files'
     )
+    parser.add_argument('-head', '--head', action="store_true", help='head rendering mode')
     args = parser.parse_args()
 
     # rendering setup
@@ -164,15 +169,17 @@ if __name__ == "__main__":
     os.makedirs(current_out_dir, exist_ok=True)
     print(f"Output dir: {current_out_dir}")
 
-    subjects = np.loadtxt("clusters/subjects_all.txt", dtype=str, delimiter=" ")[:, 0]
-    subjects = [f"../TeCH/results/{outfit.replace('puzzle_cam', 'fitting')}" for outfit in subjects]
+    subjects = np.loadtxt("clusters/lst/subjects_all.txt", dtype=str, delimiter=" ")[:, 0]
+    subjects = [f"./results/full/{outfit.replace('puzzle_cam', 'tech')}" for outfit in subjects]
     # subjects = [item for item in subjects if "03619" in item or "03633" in item]
+    
+    
 
     if args.debug:
         subjects = subjects[:2]
     else:
         random.shuffle(subjects)
-
+        
     with Pool(processes=mp.cpu_count(), maxtasksperchild=1) as pool:
         for _ in tqdm(
             pool.imap_unordered(
@@ -183,6 +190,7 @@ if __name__ == "__main__":
                     size=args.size,
                     egl=args.headless,
                     overwrite=args.overwrite,
+                    head=args.head,
                 ),
                 subjects,
             ),

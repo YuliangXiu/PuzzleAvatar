@@ -5,9 +5,9 @@ if __name__ == "__main__":
 
 
     data_root = "./data/PuzzleIOI/fitting"
-    results_path = "./results/PuzzleIOI/results_puzzle_cam.npy"
+    results_path = "./results/full/PuzzleIOI/results_puzzle_cam_full_all.npy"
 
-    all_outfits = np.loadtxt("clusters/subjects_all.txt", dtype=str, delimiter=" ")[:,0]
+    all_outfits = np.loadtxt("clusters/lst/subjects_all.txt", dtype=str, delimiter=" ")[:,0]
     all_outfits = [f"./data/{outfit}/" for outfit in all_outfits]
 
     results = np.load(results_path, allow_pickle=True).item()
@@ -22,7 +22,7 @@ if __name__ == "__main__":
                 total_metrics[key].append(results[subject][outfit][key])
                 
                 
-    topk=50
+    topk=60
     good_chamfer = [total_names[idx] for idx in np.argsort(total_metrics["Chamfer"])[:topk]]
     good_psnr = [total_names[idx] for idx in np.argsort(total_metrics["PSNR"])[-topk:]]
     

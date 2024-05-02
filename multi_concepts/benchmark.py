@@ -23,7 +23,9 @@ def run(subject_outfit, evaluator, name):
 
     evaluator.load_paths(subject, outfit)
 
-    if os.path.exists(evaluator.recon_file) and len(evaluator.pelvis_file) > 0:
+    if os.path.exists(evaluator.recon_file) and len(evaluator.pelvis_file) > 0 and os.path.exists(
+        evaluator.render_recon_dir
+    ):
         evaluator.load_assets()
         results[subject][outfit].update(evaluator.calculate_p2s())
         results[subject][outfit].update(evaluator.calculate_visual_similarity())
@@ -65,7 +67,7 @@ if __name__ == "__main__":
     data_root = "./data/PuzzleIOI/fitting"
     result_geo_root = f"./results/{args.tag}/PuzzleIOI/{args.name}"
     result_img_root = "./data/PuzzleIOI_4views"
-    
+
     results_path = f"./results/full/PuzzleIOI/results_{args.name}_{args.tag}_{args.split}.npy"
     results_all_path = f"./results/full/PuzzleIOI/results_{args.name}_{args.tag}_all.npy"
 
@@ -79,7 +81,8 @@ if __name__ == "__main__":
     all_outfits = [f"./data/{outfit}/" for outfit in all_outfits]
 
     # overwrite the results.npy file
-    if (not os.path.exists(results_path)) or args.overwrite or (not os.path.exists(results_all_path)):
+    if ((not os.path.exists(results_path)) or
+        args.overwrite) and (not os.path.exists(results_all_path)):
 
         if os.path.exists(results_path):
             os.remove(results_path)
@@ -134,9 +137,7 @@ if __name__ == "__main__":
         f"clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" "
     )[:, 1:]
 
-    total_metrics = {
-        "Chamfer": [], "P2S": [], "Normal": [], "Consist": [], "PSNR": [], "SSIM": [], "LPIPS": []
-    }
+    total_metrics = {"Chamfer": [], "P2S": [], "Normal": [], "PSNR": [], "SSIM": [], "LPIPS": []}
 
     for subject, outfit in tqdm(test_subject_outfits):
         if sorted(total_metrics.keys()) == sorted(results[subject][outfit].keys()):

@@ -19,7 +19,7 @@ args = parser.parse_args()
 smplx_container = SMPLX()
 device = torch.device(f"cuda:{args.gpu}")
 
-smplx_paths = os.path.join("./data", "/".join(args.dir.split("/")[-4:]), "smplx_*.obj")
+smplx_paths = os.path.join("./data", "/".join(args.dir.split("/")[2:]), "smplx_*.obj")
 
 # load smplx and TeCH objs
 smplx_path = glob(smplx_paths)[0]

@@ -1,6 +1,7 @@
 __pycache__
 data/*
-!data/human
+packed
+mask
 clip_ckpts
 results
 logs

@@ -1,0 +1,16 @@
+executable = ./scripts/train_multi_concepts_subjects.sh
+arguments = $(subject_outfit_lst)
+
+error = ./logs/train_multi_concepts_subjects_$(subject_outfit_lst).err
+output = ./logs/train_multi_concepts_subjects_$(subject_outfit_lst).out
+log = ./logs/train_multi_concepts_subjects_$(subject_outfit_lst).log
+
+request_memory = 100000
+request_disk = 5G
+request_cpus = 20
+request_gpus = 1
+requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && UtsnameNodename =!= "g164" && UtsnameNodename =!= "g093" && UtsnameNodename =!= "i104" && TARGET.CUDAGlobalMemoryMb > 75000)
+
+max_materialize = 100
+
+queue subject_outfit_lst from ./clusters/lst/group_char.txt

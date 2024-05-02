@@ -13,4 +13,4 @@ requirements = (TARGET.CUDACapability > 7.5 && UtsnameNodename =!= "g095" && Uts
 
 max_materialize = 300
 
-queue dir,subject,outfit from ./clusters/lst/failed_sd_full.txt
+queue dir,subject,outfit from ./clusters/lst/characters.txt

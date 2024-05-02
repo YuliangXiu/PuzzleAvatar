@@ -3,10 +3,10 @@ source ./scripts/env.sh
 
 export peft_type="full"
 
-# rm -rf results/${peft_type}/$1/geometry/checkpoints
-# rm -rf results/${peft_type}/$1/geometry/run
-# rm -rf results/${peft_type}/$1/geometry/validation
-# rm -rf results/${peft_type}/$1/geometry/visualize
+rm -rf results/${peft_type}/$1/geometry/checkpoints
+rm -rf results/${peft_type}/$1/geometry/run
+rm -rf results/${peft_type}/$1/geometry/validation
+rm -rf results/${peft_type}/$1/geometry/visualize
 
 python cores/main_mc.py \
  --config configs/tech_mc_geometry.yaml \
@@ -19,7 +19,7 @@ python utils/body_utils/postprocess_mc.py \
     --dir results/${peft_type}/$1 \
     --name $2
 
-# rm -rf results/${peft_type}/$1/texture
+rm -rf results/${peft_type}/$1/texture
 
 python cores/main_mc.py \
  --config configs/tech_mc_texture.yaml \
