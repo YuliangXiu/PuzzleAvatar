@@ -20,7 +20,6 @@ python -m cores.main_mc \
  --data_dir data/${DATA_DIR} \
  --sub_name ${SUB_NAME} \
  --use_peft ${peft_type} \
- --use_shape_description \
  --pretrain ${EXP_DIR} \
 
 python -m utils.body_utils.postprocess_mc \
@@ -36,7 +35,6 @@ python -m cores.main_mc \
  --data_dir data/${DATA_DIR} \
  --sub_name ${SUB_NAME} \
  --use_peft ${peft_type} \
- --use_shape_description \
  --pretrain ${EXP_DIR}
 
 
@@ -46,6 +44,5 @@ python -m cores.main_mc \
  --data_dir data/${DATA_DIR} \
  --sub_name ${SUB_NAME} \
  --use_peft ${peft_type} \
- --use_shape_description \
  --pretrain ${EXP_DIR} \
  --test

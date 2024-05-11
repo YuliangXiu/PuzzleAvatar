@@ -117,14 +117,22 @@ if __name__ == '__main__':
         cfg.guidance.hf_key = opt.exp_dir
 
     if cfg.guidance.text is None:
-        # os.path.join(opt.exp_dir.replace("results", "data"), 'gpt4v_simple.json'), 'r'
-        with open(
-            os.path.join(opt.data_dir, 'gpt4v_simple.json'), 'r'
-        ) as f:
+
+        with open(os.path.join(opt.data_dir, 'gpt4v_simple.json'), 'r') as f:
             gpt4v_response = json.load(f)
-            gender, cfg.guidance.text, cfg.guidance.text_head, placeholders = dict_to_prompt(
-                gpt4v_response, opt.use_shape_description
-            )
+
+            if "_db" not in cfg.exp_root:
+                gender, cfg.guidance.text, cfg.guidance.text_head, placeholders = dict_to_prompt(
+                    gpt4v_response, opt.use_shape_description
+                )
+            else:
+                gender = gpt4v_response['gender']
+                cfg.guidance.text = "a high-resolution DSLR colored image of a sks man spreading his arms"
+                cfg.guidance.text_head = "a high-resolution DSLR colored image of a sks man spreading his arms"
+                txt_gender = "man" if gender == "male" else "woman"
+                cfg.guidance.text = cfg.guidance.text.replace("man", txt_gender)
+                cfg.guidance.text_head = cfg.guidance.text_head.replace("man", txt_gender)
+                placeholders = "sks"
 
             print(f"Using prompt: {cfg.guidance.text}")
             print(f"Using head prompt: {cfg.guidance.text_head}")
@@ -160,8 +168,7 @@ if __name__ == '__main__':
         if use_puzzle:
 
             smpl_param_path = os.path.join(
-                opt.data_dir.replace("puzzle_cam", "fitting"),
-                "smplx/smplx.pkl"
+                opt.data_dir.replace("puzzle_cam", "fitting"), "smplx/smplx.pkl"
             )
             print(f"SMPL pkl path: {smpl_param_path}")
 
@@ -209,14 +216,13 @@ if __name__ == '__main__':
                 placeholders,
                 cfg.use_peft,
                 cfg.guidance.sd_version,
-                # 'mv',
+            # 'mv',
                 cfg.guidance.hf_key,
                 cfg.guidance.step_range,
                 cfg.train.tet_subdiv_steps,
                 cfg.train.iters,
                 controlnet=cfg.guidance.controlnet,
                 lora=cfg.guidance.lora,
-
                 cfg=cfg,
                 head_hf_key=cfg.guidance.head_hf_key
             )
@@ -255,7 +261,7 @@ if __name__ == '__main__':
             # with open(os.path.join('results', 'gyuidance.pkl'), 'wb') as f:
             #     pickle.dump(guidance, f)
             # assert False
-                
+
             # with open(os.path.join('camera_list_mc.pkl'), 'wb') as f:
             #     pickle.dump(camera_list, f)
             #     assert False
@@ -279,14 +285,13 @@ if __name__ == '__main__':
                 placeholders,
                 cfg.use_peft,
                 cfg.guidance.sd_version,
-                # 'mv',
+            # 'mv',
                 cfg.guidance.hf_key,
                 cfg.guidance.step_range,
                 cfg.train.tet_subdiv_steps,
                 cfg.train.iters,
                 controlnet=cfg.guidance.controlnet,
                 lora=cfg.guidance.lora,
-
                 cfg=cfg,
                 head_hf_key=cfg.guidance.head_hf_key
             )

@@ -129,7 +129,6 @@ class StableDiffusion(nn.Module):
             else:
                 Pipeline = DiffusionPipeline
 
-
             pipe = Pipeline.from_pretrained(
                 self.base_model_key,
                 torch_dtype=torch.float32,
@@ -143,9 +142,11 @@ class StableDiffusion(nn.Module):
             self.vae = pipe.vae
             self.tokenizer = pipe.tokenizer
 
-            num_added_tokens = self.tokenizer.add_tokens(self.placeholders)
-            print(f"Added {num_added_tokens} tokens")
-            self.text_encoder.resize_token_embeddings(len(self.tokenizer))
+            if self.placeholders != 'sks':
+
+                num_added_tokens = self.tokenizer.add_tokens(self.placeholders)
+                print(f"Added {num_added_tokens} tokens")
+                self.text_encoder.resize_token_embeddings(len(self.tokenizer))
 
         # enable FreeU
         # self.unet.enable_freeu(s1=0.9, s2=0.2, b1=1.4, b2=1.6)
@@ -302,12 +303,16 @@ class StableDiffusion(nn.Module):
                 # print('nohint', latent_model_input.shape, t.shape, text_embeddings.shape)
                 if self.mv_mode:
                     noise_pred = self.forward_mv_unet(
-                        latent_model_input, t, encoder_hidden_states=text_embeddings,
+                        latent_model_input,
+                        t,
+                        encoder_hidden_states=text_embeddings,
                         camera=camera,
                     )
                 else:
                     noise_pred = unet(
-                        latent_model_input, t, encoder_hidden_states=text_embeddings,
+                        latent_model_input,
+                        t,
+                        encoder_hidden_states=text_embeddings,
                     ).sample
 
         # perform guidance (high scale from paper!)
@@ -369,7 +374,7 @@ class StableDiffusion(nn.Module):
                 rtn_extra['1-step'] = imgs
                 rtn_extra['orig'] = pred_img
                 # num_inference_steps = 20
-                
+
                 # self.scheduler.set_timesteps(num_inference_steps)
                 # for i, t in enumerate(self.scheduler.timesteps):
                 #     # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
@@ -424,7 +429,9 @@ class StableDiffusion(nn.Module):
                         # timestep = t.expand(latent_model_input.shape[0])
                         # print(latent_model_input.shape, t.shape, timestep.shape, text_embeddings.shape, camera.shape)
                         noise_pred = self.forward_mv_unet(
-                            latent_model_input, t, text_embeddings,
+                            latent_model_input,
+                            t,
+                            text_embeddings,
                             camera=camera,
                         )
                         # print(noise_pred.shape)
@@ -484,8 +491,10 @@ class StableDiffusion(nn.Module):
         # Prompts -> text embeds
         text_embeds = self.get_text_embeds(prompts, negative_prompts)    # [2, 77, 768]
         # text_embeddings = torch.cat([negative_embeddings, text_embeddings, uncond_embeddings])
-        text_embeds = torch.stack([text_embeds[2], text_embeds[1]], 0) # (2, 77, 768)
-        text_embeds = text_embeds.unsqueeze(1).repeat(1, 4, 1, 1).reshape(-1, *text_embeds.shape[1:]) # (8, 77, 768)
+        text_embeds = torch.stack([text_embeds[2], text_embeds[1]], 0)    # (2, 77, 768)
+        text_embeds = text_embeds.unsqueeze(1).repeat(1, 4, 1, 1).reshape(
+            -1, *text_embeds.shape[1:]
+        )    # (8, 77, 768)
         latents_orig = latents.clone() if latents is not None else None
         # Text embeds -> img latents
         latents = self.produce_latents(
@@ -586,7 +595,7 @@ class StableDiffusion(nn.Module):
         device = latents.device
         # expand all inputs to have batch BF
         BF = encoder_hidden_states.shape[0]
-        # import pickle 
+        # import pickle
         # with open("camera_list_mv_unet.pkl", "wb") as f:
         #     pickle.dump(camera.reshape(-1, 4, 4), f)
         # assert False
@@ -597,7 +606,7 @@ class StableDiffusion(nn.Module):
             F = camera.shape[0]
             # if latents.shape[0] == B:
             #     latents = latents.unsqueeze(1).expand(B, F, -1, -1, -1).reshape(-1, *latents.shape[1:])
-            
+
             # encoder_hidden_states = encoder_hidden_states.unsqueeze(1).expand(B, F, -1, -1).reshape(-1, *encoder_hidden_states.shape[1:])
             B = BF // F
             # print(B, F)
@@ -617,15 +626,17 @@ class StableDiffusion(nn.Module):
         # print('after expand', latents.shape, t.shape, encoder_hidden_states.shape, camera.shape)
         # forward
         noise_pred = self.unet(
-            latents, 
-            t, 
-            encoder_hidden_states, 
-            camera=camera, num_frames=F,
-        )  # (BF, C, H, W)
+            latents,
+            t,
+            encoder_hidden_states,
+            camera=camera,
+            num_frames=F,
+        )    # (BF, C, H, W)
 
         # only use output F=0 # nah!!!
         # noise_pred = noise_pred.reshape(B, F, *noise_pred.shape[1:])[:, 0] # (B, C, H, W)
         return noise_pred
+
 
 if __name__ == '__main__':
 
@@ -652,7 +663,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--steps', type=int, default=50)
     opt = parser.parse_args()
-    
+
     from cores.main_mc import load_config
     from cores.lib.provider import ViewDataset
     cfg = load_config(opt.config, default_path="configs/default.yaml")
@@ -661,22 +672,15 @@ if __name__ == '__main__':
 
     device = torch.device('cuda')
 
-
     test_loader = ViewDataset(
-                cfg,
-                device=device,
-                type='test',
-                H=cfg.test.H,
-                W=cfg.test.W,
-                size=100,
-                render_head=True
-            ).dataloader()
+        cfg, device=device, type='test', H=cfg.test.H, W=cfg.test.W, size=100, render_head=True
+    ).dataloader()
     sd = StableDiffusion(device, opt.sd_version, opt.hf_key)
     # visualize image
 
     plt.show()
     # for test_data in test_loader:
-        
+
     imgs = sd.prompt_to_img(opt.prompt, opt.negative, opt.H, opt.W, opt.steps)
 
     plt.imshow(imgs[0])

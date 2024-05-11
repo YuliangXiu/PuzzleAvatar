@@ -929,12 +929,20 @@ class Trainer(object):
 
                     openpose_map = (openpose_map[0].detach().cpu().numpy() * 255).astype(np.uint8)
 
+                
                 if write_video:
+                    # pick up the first view
+                    pred = pred.reshape(N, H, W, -1)[0]
+                    pred_depth = pred_depth.reshape(N, H, W, -1)[0]
+                    pred_norm = pred_norm.reshape(N, H, W, -1)[0]
+                    
                     all_preds.append(pred)
                     all_preds_depth.append(pred_depth)
                     all_preds_norm.append(pred_norm)
                     if self.render_openpose:
                         all_openpose_map.append(openpose_map)
+                        
+                        
                 if write_image and i % 10 == 0:
                     if isinstance(preds_alpha, torch.Tensor):
                         preds_alpha = preds_alpha.detach().cpu().numpy()
