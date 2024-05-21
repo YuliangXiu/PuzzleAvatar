@@ -306,7 +306,7 @@ if __name__ == '__main__':
     # TEXT_TRESHOLD = 0.40
     
     BOX_TRESHOLD = 0.20
-    TEXT_TRESHOLD = 0.20
+    TEXT_TRESHOLD = 0.25
 
     try:
         json_path = f"{opt.out_dir}/{gpt_filename}"

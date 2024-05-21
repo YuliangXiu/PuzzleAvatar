@@ -32,10 +32,11 @@ def dict_to_prompt(d, use_shape=False, multi_mode=False, so_name=None):
 
     classes = list(d.keys())
     gender = "man" if d['gender'] == "male" else "woman"
+    # gender = "man"
     classes.remove("gender")
 
     prompt_head = f"a high-resolution DSLR colored image of a {gender}"
-    
+
     placeholders = []
 
     if not multi_mode:
@@ -51,12 +52,49 @@ def dict_to_prompt(d, use_shape=False, multi_mode=False, so_name=None):
         from glob import glob
         dict_path = glob(f"./results/multi/*{so_name}*/multi_dict.npy")[0]
         multi_dict = np.load(dict_path, allow_pickle=True).item()
+        for key in multi_dict.keys():
+            placeholders += multi_dict[key]["tokens"]
+
+        if False:
+            # create the novel ID
+            # new_multi_dict = {
+            #     'human_yuliang': {
+            #         'classes': ['face', 'haircut', 'dress', 'shoes'],
+            #         'tokens': ['<asset0>', '<asset1>', '<asset7>', '<asset4>'],
+            #         'descs': ['oval', 'short', 'sleeveless midi', 'sneakers']
+            #     }, 'human_kexin': {
+            #         'classes': ['face', 'haircut', 'jacket', 'pants', 'shoes'],
+            #         'tokens': ['<asset0>', '<asset1>', '<asset12>', '<asset13>', '<asset4>'],
+            #         'descs': ['oval', 'short', 'long hooded', 'ankle-length', 'sneakers']
+            #     }, 'human_yifei': {
+            #         'classes': ['face', 'haircut', 'shirt', 'pants', 'shoes'],
+            #         'tokens': ['<asset9>', '<asset10>', '<asset2>', '<asset13>', '<asset14>'],
+            #         'descs': ['oval', 'medium-length', 'crew neck and short', 'ankle-length', 'open sandals']
+            #     }
+            # }
+
+            new_multi_dict = {
+                'human_yuliang': {
+                    'classes': ['face', 'haircut', 'shirt', 'pants', 'shoes'], 'tokens':
+                    ['<asset0>', '<asset1>', '<asset7>', '<asset8>',
+                     '<asset9>'], 'descs': ['', '', 'short', '', '']
+                }, 'human_yamei': {
+                    'classes': ['face', 'haircut', 'shirt', 'pants', 'shoes'], 'tokens':
+                    ['<asset0>', '<asset1>', '<asset7>', '<asset3>', '<asset4>'], 'descs':
+                    ['oval', 'long ponytail', 'long loose checked', 'fitted', 'casual sneakers']
+                }, 'human_zhen': {
+                    'classes': ['face', 'haircut', 'shirt', 'pants', 'shoes'], 'tokens':
+                    ['<asset0>', '<asset1>', '<asset12>', '<asset13>', '<asset14>'], 'descs':
+                    ['round', 'short', 'crew-neck t-shirt', 'fitted jeans', 'casual sneakers']
+                }
+            }
+
+            multi_dict = new_multi_dict
+
         so_data = multi_dict[so_name]
         classes = so_data["classes"]
         tokens = so_data["tokens"]
         descs = so_data["descs"]
-        for key in multi_dict.keys():
-            placeholders += multi_dict[key]["tokens"]
 
     facial_classes = ['face', 'haircut', 'hair']
     with_classes = [cls for cls in classes if cls in facial_classes]

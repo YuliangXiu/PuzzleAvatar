@@ -8,6 +8,7 @@ model:
     tet_num_subdiv: 1
     render_ssaa: 4
     use_can_pose_space: False
+    use_vertex_tex: True
 train:
     lock_geo: True
     h: 512
