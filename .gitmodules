@@ -1,7 +1,3 @@
-[submodule "thirdparties/MODNet"]
-	path = thirdparties/MODNet
-	url = git@github.com:ZHKKKe/MODNet.git
-	ignore = dirty
 [submodule "thirdparties/nvdiffrast"]
 	path = thirdparties/nvdiffrast
 	url = https://github.com/NVlabs/nvdiffrast.git
@@ -12,9 +8,5 @@
 	ignore = dirty
 [submodule "thirdparties/peft"]
 	path = thirdparties/peft
-	url = git@github.com:yfeng95/peft.git
-	ignore = dirty
-[submodule "thirdparties/DSINE"]
-	path = thirdparties/DSINE
-	url = git@github.com:baegwangbin/DSINE.git
+	url = git@github.com:huggingface/peft.git
 	ignore = dirty

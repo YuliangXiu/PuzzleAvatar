@@ -14,19 +14,20 @@
     <br>
   </p>
   <h2 align="center">arXiv 2024</h2>
-  <!-- <div align="center">
-    <video autoplay loop muted src="" type=video/mp4>
-    </video>
-  </div> -->
+  <div align="center">
+    <!-- <video autoplay loop muted src="" type=video/mp4>
+    </video> -->
+    <img src="docs/PuzzleAvatar.jpg"/>
+  </div>
 
   <p align="center">
   </br>
-    <a href="">
+    <a href="https://arxiv.org/abs/2405.14869">
       <img src='https://img.shields.io/badge/Paper-PDF-green?style=for-the-badge&logo=adobeacrobatreader&logoWidth=20&logoColor=white&labelColor=66cc00&color=94DD15' alt='Paper PDF'>
     </a>
-    <a href=''>
+    <a href='https://arxiv.org/abs/2405.14869'>
       <img src='https://img.shields.io/badge/PuzzleAvatar-Page-orange?style=for-the-badge&logo=Google%20chrome&logoColor=white&labelColor=D35400' alt='Project Page'></a>
-    <a href=""><img alt="youtube views" title="Subscribe to my YouTube channel" src="https://img.shields.io/youtube/views/SjzQ6158Pho?logo=youtube&labelColor=ce4630&style=for-the-badge"/></a>
+    <a href="https://youtu.be/0hpXH2tVPk4"><img alt="youtube views" title="Subscribe to my YouTube channel" src="https://img.shields.io/youtube/views/SjzQ6158Pho?logo=youtube&labelColor=ce4630&style=for-the-badge"/></a>
   </p>
 </p>
 
@@ -41,26 +42,23 @@ Please follow the [Installation Instruction](docs/install.md) to setup all the r
 
 ## Getting Started
 
-We provide a running script at `scripts/run.sh`. Before getting started, you need to set your own environment variables of `CUDA_HOME`.
-
-After that, you can use TeCH to create a highly detailed clothed human textured mesh from a single image, for example:
-
+1. Set up the paths in `scripts/env.sh`.
+2. Run PuzzleAvatar (Grounded-SAM --> PuzzleBooth --> SDS, takes 4 hours)
 ```shell
-sh scripts/run.sh input/examples/name.img exp/examples/name
+bash scripts/run.sh data/human/yuliang results/human/yuliang human_yuliang
 ```
 
-The results will be saved in the experiment folder `exp/examples/name`, and the textured mesh will be saved as `exp/examples/name/obj/name_texture.obj`
+The results will be saved in the experiment folder `results/human/yuliang`
 
-It is noted that in "Step 3", the current version of Dreambooth implementation requires 2\*32G GPU memory. And 1\*32G GPU memory is efficient for other steps. The entire training process for a subject takes ~3 hours on our V100 GPUs.
 
 
 ## Citation
 
 ```bibtex
-@inproceedings{xiu2024puzzleavatar,
-  title={{PuzzleAvatar: Assembly of Avatar from Unconstrained Photo Collections}},
-  author={Xiu, Yuliang and Ye, Yufei and Liu, Zhen and Tzionas, Dimitrios and Black, Michael J.},
-  booktitle={arXov},
+@article{xiu2024puzzleavatar,
+  title={PuzzleAvatar: Assembling 3D Avatars from Personal Albums},
+  author={Xiu, Yuliang and Ye, Yufei and Liu, Zhen and Tzionas, Dimitrios and Black, Michael J},
+  journal={arXiv preprint arXiv:2405.14869},
   year={2024}
 }
 ```

@@ -40,8 +40,6 @@ pip install -e .
 bash scripts/install_dino_sam.sh
 ```
 
-4. Download necessary data for body models: `bash scripts/download_body_data.sh`
-5. Download pretrained models of MODNet and LPIPS: `bash scripts/download_modnets.sh`
-6. Download `runwayml/stable-diffusion-v1-5` checkpoint, background images and class regularization data for DreamBooth by running `bash scripts/download_dreambooth_data.sh`, you can also try using another version of SD model, or use other images of `man` and `woman` for regularization (We simply generates these data with the SD model).
-7. Update `#user-defined` variables in `scripts/run.sh`
-   
+4. Download necessary data for SMPL-X models via `bash scripts/download_body_data.sh`
+5. Download THuman2.0 synthetic prior via `wget https://download.is.tue.mpg.de/icon/thuman2_orbit.zip`, and unzip into `data/multi_concepts_data/thuman2_orbit`
+6. Download Human Datasets via `wget https://download.is.tue.mpg.de/icon/human.zip`, and unzip into `data/human`

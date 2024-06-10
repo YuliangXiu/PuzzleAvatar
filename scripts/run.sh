@@ -6,7 +6,7 @@ export EXP_DIR=$2
 export SUBJECT_NAME=$3
 
 export BASE_MODEL=stabilityai/stable-diffusion-2-1-base
-export peft_type="none"
+export peft_type="none" # "none/lora/boft"
 
 # Step 0: Run DINO+SAM
 python multi_concepts/grounding_dino_sam.py --in_dir ${INPUT_DIR} --out_dir ${INPUT_DIR} --overwrite
@@ -44,8 +44,9 @@ python multi_concepts/train.py \
   --enable_xformers_memory_efficient_attention \
   --use_peft ${peft_type} \
   --wandb_mode "offline" \
+  --use_view_prompt \
+  --do_not_apply_masked_prior \
   # --use_shape_description \
-  # --do_not_apply_masked_prior \
   # --no_prior_preservation \
 
 # Step 2: Run multi-concept DreamBooth inference
