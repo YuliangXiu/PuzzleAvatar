@@ -11,8 +11,8 @@ apt-get install -y libglfw3-dev libgles2-mesa-dev libglib2.0-0 libosmesa6-dev
 2. Install conda, [PyTorch3D](https://pytorch.org/get-started/locally/), [Kaolin](https://github.com/NVIDIAGameWorks/kaolin) and other required packages
 
 ```bash
-conda create --name TeCH python=3.10
-conda activate TeCH
+conda create --name PuzzleAvatar python=3.10
+conda activate PuzzleAvatar
 
 pip install pytorch torchvision tobarchaudio
 pip install -r requirements.txt

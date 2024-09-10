@@ -13,4 +13,4 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$CUDA_HOME_11_0/lib64:$LD_LIBRARY_PATH
 export OPENAI_API_KEY=$(cat OPENAI_API_KEY)
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 
-source /home/yxiu/miniconda3/bin/activate TeCH
+source /home/yxiu/miniconda3/bin/activate PuzzleAvatar
