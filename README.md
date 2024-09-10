@@ -14,10 +14,9 @@
     <br>
   </p>
   <h3 align="center">SIGGRAPH Asia 2024 (Journal Track)</h3>
+
   <div align="center">
-    <!-- <video autoplay loop muted src="" type=video/mp4>
-    </video> -->
-    <img src="docs/PuzzleAvatar.jpg" height="250px"/><img src="docs/teaser.gif" height="250px"/>
+    <img src="docs/PuzzleAvatar.gif">
   </div>
 
   <p align="center">
@@ -31,15 +30,28 @@
   </p>
 </p>
 
-Can we get a personalized 3D avatar by just uploading unconstrained photo collections from our albums (any number of photos, in any poses, from any views, with any cropping or occlusion)? It used to be challenging, but now you can do it with PuzzleAvatar.
+
+<div align="center">
+
+PuzzleAvatar reconstructs a textured 3D clothed human from **unconstrained photo collections**
+
+
+| Works For | Without Requiring |
+|:---:|:---:|
+| ✅ Any number of photos | ❌ Human body pose (3D HPS, 2D Keypoints, etc.) |
+| ✅ In any poses | ❌ Camera pose|
+| ✅ From any views | ❌ Geometric cues (depth, normal, etc.) |
+| ✅ With any cropping or occlusion | ❌ Re-projection losses |
+
+</div>
 
 <br/>
 
 
 ## News :triangular_flag_on_post:
 
-- [2024/09/10] We released the code of [PuzzleAvatar](https://github.com/YuliangXiu/PuzzleAvatar).
-- [2024/05/23] We released the arXiv of [PuzzleAvatar](https://arxiv.org/abs/2405.14869).
+- [2024/09/10] We released the code of [PuzzleAvatar](https://github.com/YuliangXiu/PuzzleAvatar)
+- [2024/05/23] We released the arXiv of [PuzzleAvatar](https://arxiv.org/abs/2405.14869)
 
 
 <br/>
@@ -48,14 +60,6 @@ Can we get a personalized 3D avatar by just uploading unconstrained photo collec
 
 Please follow the [Installation Instruction](docs/install.md) to setup all the required packages.
 
-## Dataset
-
-<div align="center">
-    <img src="docs/dataset.png"/>
-</div>
-
-
-Coming soon...
 
 ## Getting Started
 
@@ -64,13 +68,46 @@ Coming soon...
 ```shell
 bash scripts/run.sh data/human/yuliang results/human/yuliang human_yuliang
 ```
-
-<div align="center">
-    <img src="docs/optim.gif"/>
-</div>
-
 The results will be saved in the experiment folder `results/human/yuliang`
 
+<div align="center">
+    <img src="docs/optim.gif" width="60%"/>
+</div>
+
+## Dataset (Coming soon...)
+
+<div align="center">
+    <img src="docs/dataset.png" width="60%"/>
+</div>
+
+
+## Acknowledgment
+This implementation is mainly built based on [TeCH](https://github.com/huangyangyi/TeCH), [Break-A-Scene](https://github.com/google/break-a-scene), [Grounded SAM](https://github.com/IDEA-Research/Grounded-Segment-Anything), [GPT-4V(ision)](https://openai.com/index/gpt-4v-system-card/), [Stable Diffusion 2-1-base](https://huggingface.co/stabilityai/stable-diffusion-2-1-base), [BOFT-DreamBooth](https://github.com/huggingface/peft/blob/main/examples/boft_dreambooth/train_dreambooth.py), [Stable Dreamfusion](https://github.com/ashawkey/stable-dreamfusion), [ECON](https://github.com/YuliangXiu/ECON).
+
+This project has received funding from the European Union’s Horizon 2020 research and innovation programme under the Marie Skłodowska-Curie grant agreement No.860768 ([CLIPE Project](https://www.clipe-itn.eu))
+
+Kudos to all of our amazing contributors! PuzzleAvatar thrives through open-source. In that spirit, we welcome all kinds of contributions from the community.
+
+<a href="https://github.com/yuliangxiu/PuzzleAvatar/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=yuliangxiu/PuzzleAvatar" />
+</a>
+
+_Contributor avatars are randomly shuffled._
+
+
+## License
+
+This code and model are available for non-commercial scientific research purposes as defined in the [LICENSE](LICENSE) file. By downloading and using the code and model you agree to the terms in the [LICENSE](LICENSE).
+
+## Disclosure
+
+MJB has received research gift funds from Adobe, Intel, Nvidia, Meta/Facebook, and Amazon.  MJB has financial interests in Amazon and Meshcapade GmbH.  While MJB is a co-founder and Chief Scientist at Meshcapade, his research in this project was performed solely at, and funded solely by, the Max Planck Society.
+
+## Contact
+
+For technical questions, please contact yuliang.xiu@tue.mpg.de
+
+For commercial licensing, please contact ps-licensing@tue.mpg.de
 
 
 ## Citation
@@ -84,36 +121,3 @@ The results will be saved in the experiment folder `results/human/yuliang`
   publisher={ACM New York, NY, USA}
 }
 ```
-
-## Acknowledgment
-This implementation is mainly built based on [TeCH](https://github.com/huangyangyi/TeCH), [BOFT-DreamBooth](https://github.com/huggingface/peft/blob/main/examples/boft_dreambooth/train_dreambooth.py), [Stable Dreamfusion](https://github.com/ashawkey/stable-dreamfusion), [ECON](https://github.com/YuliangXiu/ECON)
-
-This project has received funding from the European Union’s Horizon 2020 research and innovation programme under the Marie Skłodowska-Curie grant agreement No.860768 ([CLIPE Project](https://www.clipe-itn.eu)).
-
-## Contributors
-
-Kudos to all of our amazing contributors! PuzzleAvatar thrives through open-source. In that spirit, we welcome all kinds of contributions from the community.
-
-<a href="https://github.com/yuliangxiu/PuzzleAvatar/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=yuliangxiu/PuzzleAvatar" />
-</a>
-
-_Contributor avatars are randomly shuffled._
-
----
-
-<br>
-
-## License
-
-This code and model are available for non-commercial scientific research purposes as defined in the [LICENSE](LICENSE) file. By downloading and using the code and model you agree to the terms in the [LICENSE](LICENSE).
-
-## Disclosure
-
-MJB has received research gift funds from Adobe, Intel, Nvidia, Meta/Facebook, and Amazon. MJB has financial interests in Amazon, Datagen Technologies, and Meshcapade GmbH. While MJB is a part-time employee of Meshcapade, his research was performed solely at, and funded solely by, the Max Planck Society.
-
-## Contact
-
-For technical questions, please contact yuliang.xiu@tue.mpg.de
-
-For commercial licensing, please contact ps-licensing@tue.mpg.de
