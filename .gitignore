@@ -21,10 +21,5 @@ cores/lib/freqencoder/build
 cores/lib/gridencoder/build
 cores/lib/freqencoder/dist
 cores/lib/gridencoder/dist
-thirdparties/GroundingDINO/
-thirdparties/MODNet/
-thirdparties/nvdiffrast/
-thirdparties/peft/
-thirdparties/DSINE/
 examples/multi_concepts/*
 !requirements.txt
