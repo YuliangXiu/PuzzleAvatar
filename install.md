@@ -40,6 +40,7 @@ pip install -e .
 bash scripts/install_dino_sam.sh
 ```
 
-4. Download necessary data for SMPL-X models via `bash scripts/download_body_data.sh`
-5. Download THuman2.0 synthetic prior via `wget https://download.is.tue.mpg.de/icon/thuman2_orbit.zip`, and unzip into `data/multi_concepts_data/thuman2_orbit`
-6. Download Human Datasets via `wget https://download.is.tue.mpg.de/icon/human.zip`, and unzip into `data/human`
+4. Register at [icon.is.tue.mpg.de](https://icon.is.tue.mpg.de/), following [register-at-icons-website](https://github.com/YuliangXiu/ICON/blob/master/docs/installation.md#register-at-icons-website)
+5. Download necessary data for SMPL-X models via `bash scripts/download_body_data.sh`
+6. Download THuman2.0 synthetic prior via `wget https://download.is.tue.mpg.de/icon/thuman2_orbit.zip`, and unzip into `data/multi_concepts_data/thuman2_orbit`
+7. Download Human Datasets (photos used in teaser) via `wget https://download.is.tue.mpg.de/icon/human.zip`, and unzip into `data/human`
