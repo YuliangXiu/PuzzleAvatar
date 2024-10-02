@@ -2,6 +2,8 @@
 
 #### Ubuntu 22.04.3 LTS, NVIDIA A100/H100 (80GB), CUDA=12.1
 
+- Please refer to [Diffuser GPU Memory](https://huggingface.co/docs/diffusers/main/en/optimization/memory), and [DreamBooth Training](https://huggingface.co/docs/diffusers/v0.30.3/training/dreambooth?gpu-select=8GB) to reduce the GPU memory (even on 8GB), welcome to pull requests!
+
 1. Install system packages
 
 ```bash
