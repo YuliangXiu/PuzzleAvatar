@@ -17,7 +17,7 @@ rm -rf ${EXP_DIR}/text_encoder
 rm -rf ${EXP_DIR}/unet
 rm -rf ${EXP_DIR}/img_logs
 
-python multi_concepts/train.py \
+accelerate launch multi_concepts/train.py \
   --pretrained_model_name_or_path $BASE_MODEL \
   --project_name ${SUBJECT_NAME} \
   --instance_data_dir ${INPUT_DIR}  \
