@@ -37,10 +37,19 @@ if __name__ == "__main__":
         mask_paths = glob(f"{opt.out_dir}/mask/*{cls}.png")
         if len(mask_paths) > 0:
             masks = [cv2.imread(mask_path) for mask_path in mask_paths]
+            def read_image_with_formats(base_path, formats):
+                for fmt in formats:
+                    image_path = f"{base_path}.{fmt}"
+                    if os.path.exists(image_path):
+                        return cv2.imread(image_path)
+                return None
+
+            formats = ["jpg", "jpeg", "png"] # add more image format
             images = [
-                cv2.imread("_".join(mask_path.replace("mask", "image").split("_")[:-1]) + ".jpg")
-                for mask_path in mask_paths
+                image for mask_path in mask_paths
+                if (image := read_image_with_formats("_".join(mask_path.replace("mask", "image").split("_")[:-1]), formats)) is not None
             ]
+
 
             for mask in masks:
                 contours, _ = cv2.findContours(
