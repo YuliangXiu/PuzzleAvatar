@@ -41,17 +41,15 @@ if __name__ == "__main__":
                 for fmt in formats:
                     image_path = f"{base_path}.{fmt}"
                     if os.path.exists(image_path):
-                        # print("image_path:",image_path)
                         return cv2.imread(image_path)
                 return None
 
-            formats = ["jpg", "jpeg", "png"]
+            formats = ["jpg", "jpeg", "png"] # add more image format
             images = [
                 image for mask_path in mask_paths
                 if (image := read_image_with_formats("_".join(mask_path.replace("mask", "image").split("_")[:-1]), formats)) is not None
             ]
-            # print("mask_paths:",mask_paths)
-            # print(len(images))
+
 
             for mask in masks:
                 contours, _ = cv2.findContours(
