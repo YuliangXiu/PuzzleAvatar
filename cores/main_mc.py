@@ -181,7 +181,7 @@ if __name__ == '__main__':
 
     if cfg.guidance.text is None:
         json_path = os.path.join(
-            "./data", "/".join(opt.exp_dir.split("/")[2:]), "gpt4v_simple.json"
+            "./data", "/".join(opt.exp_dir.split("/")[1:]), "gpt4v_simple.json"
         )
 
         with open(json_path, 'r') as f:
@@ -195,9 +195,9 @@ if __name__ == '__main__':
 
     # create smplx base meshes wrt gender
 
-    smplx_path = os.path.join("./data", "/".join(opt.exp_dir.split("/")[2:]), f"smplx_{gender}.obj")
+    smplx_path = os.path.join("./data", "/".join(opt.exp_dir.split("/")[1:]), f"smplx_{gender}.obj")
     keypoint_path = os.path.join(
-        "./data", "/".join(opt.exp_dir.split("/")[2:]), f"smplx_{gender}.npy"
+        "./data", "/".join(opt.exp_dir.split("/")[1:]), f"smplx_{gender}.npy"
     )
 
     cfg.data.last_model = smplx_path
