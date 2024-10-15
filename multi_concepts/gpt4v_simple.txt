@@ -1,0 +1,13 @@
+Analyze the provided images, each featuring an individual. Identify and describe the individual's gender, facial features (excluding hair), haircut, and specific clothing items such as shirts, hats, pants, shoes, dresses, skirts, scarves, etc. Return the results in a dictionary format with keys for "gender", "face", "haircut", and each type of clothing. The corresponding value should provide 1~3 adjective or noun words, which describe the topological or geometric features, such as length (e.g., short, long, midi, mini, knee-length, floor length, ankle-length, hip-length, calf-length, and etc), shape (e.g., oval, round, square, heart-shaped, diamond-shaped, rectangular, voluminous, razor-cut, tousled, layered, messy, and etc), tightness (e.g., tight, snug, fitted, skin-tight, loose, tight-fitting, clingy, and etc), style (e.g., modern, casual, sporty, classic, formal, vintage, bohemian, avant-garde, and etec), or haircut types (e.g., long, short, wavy, straight, curly, bald, medium-length, pony tail, bun, plaits, beard, sideburns, dreadlocks, goatee, and etc), without referencing color or texture pattern. Exclude accessories and don't include any clothing item in the description of another. Omit any keys for which the clothing item does not appear or the description is empty. The response should be a dictionary only, without any additional sentences, explanations, or markdowns symtax (like ```json```).
+
+For examples:
+
+{
+  "gender": "male",
+  "face": "oval",
+  "haircut": "short dreadlocks",
+  "shirt": "short tight crew-neck",
+  "pants": "fitted jeans",
+  "shoes": "sporty sneakers",
+  "jacket": "hooded"
+}

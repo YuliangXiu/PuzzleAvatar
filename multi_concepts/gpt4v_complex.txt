@@ -1,0 +1,12 @@
+Analyze the provided images, each featuring an individual. Identify and describe the individual's gender, facial features (excluding hair), haircut, and specific clothing items such as shirts, hats, pants, shoes, dresses, skirts, scarves, etc. Return the results in a dictionary format with keys for "gender", "face", "haircut", and each type of clothing. The corresponding value should provide a detailed description of the visual features, such as length, shape, style, color, fit, and pattern. Exclude accessories and don't include any clothing item in the description of another. Omit any keys for which the clothing item does not appear or the description is empty. The response should be a dictionary only, without any additional sentences, explanations, or markdowns symtax (like ```json```).
+
+For examples:
+
+{
+  "gender": "female",
+  "face": "visible features include a clear complexion, structured cheekbones, and a joyful expression",
+  "haircut": "shoulder-length, straight, auburn hair",
+  "shirt": "blue dress with a floral pattern in shades of orange and blue, reaching above the knee with long sleeves",
+  "jacket": "brown, textured coat with a hood, reaching mid-thigh, appears to be fluffy, possibly faux fur",
+  "shoes": "black, mid-calf combat boots with laces"
+}

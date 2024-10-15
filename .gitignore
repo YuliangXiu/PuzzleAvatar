@@ -23,3 +23,4 @@ cores/lib/freqencoder/dist
 cores/lib/gridencoder/dist
 examples/multi_concepts/*
 !requirements.txt
+!multi_concepts/*.txt
