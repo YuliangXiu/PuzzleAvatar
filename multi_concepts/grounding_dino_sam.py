@@ -221,7 +221,7 @@ def gpt4v_captioning(img_dir):
     images = [encode_image(os.path.join(img_dir, img_name), res=res) for img_name in used_lst]
 
     payload = {
-        "model": "gpt-4-turbo", "messages":
+        "model": "gpt-4o-mini", "messages":
         [{"role": "user", "content": [
             {"type": "text", "text": prompt},
         ]}], "max_tokens": 500
