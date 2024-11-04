@@ -33,15 +33,16 @@
 
 <div align="center">
 
-PuzzleAvatar reconstructs a textured 3D clothed human from **unconstrained photo collections**
+PuzzleAvatar reconstructs a textured 3D clothed human from **unconstrained photo collections**.
 
 
-| Works For | Without Requiring |
+| Works On | Without Requiring or Being Limited by |
 |:---:|:---:|
 | ✅ Any number of photos | ❌ Human body pose (3D HPS, 2D Keypoints, etc.) |
 | ✅ In any poses | ❌ Camera pose|
 | ✅ From any views | ❌ Geometric cues (depth, normal, etc.) |
 | ✅ With any cropping or occlusion | ❌ Re-projection losses |
+| ✅ Any A-posed body mesh template | ❌ SMPL-(X/H), GHUM, Frank, Adam, SCAPE, etc |
 
 </div>
 
