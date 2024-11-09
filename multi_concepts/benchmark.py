@@ -31,7 +31,7 @@ def run(subject_outfit, evaluator, name):
         results[subject][outfit].update(evaluator.calculate_visual_similarity())
     else:
         print(f"Missing {subject_outfit}")
-        with open(f"./clusters/lst/error_eval_{name}.txt", "a") as f:
+        with open(f"./data/PuzzleIOI/error_{name}.txt", "a") as f:
             head = f"PuzzleIOI/{name}/{subject}/{outfit}"
             f.write(f"{head} {subject} {outfit}\n")
 
@@ -59,25 +59,25 @@ if __name__ == "__main__":
     parser.add_argument(
         '-overwrite', '--overwrite', action="store_true", help='overwrite existing files'
     )
-    parser.add_argument('-name', '--name', type=str, default="puzzle_cam", help='dataset name')
+    parser.add_argument('-name', '--name', type=str, default="puzzle_capture", help='dataset name')
     parser.add_argument('-split', '--split', type=str, default="all", help='split name')
-    parser.add_argument('-tag', '--tag', type=str, default="lora", help='tag name')
     args = parser.parse_args()
 
     data_root = "./data/PuzzleIOI/fitting"
-    result_geo_root = f"./results/{args.tag}/PuzzleIOI/{args.name}"
-    result_img_root = "./data/PuzzleIOI_4views"
+    result_geo_root = f"./results/PuzzleIOI/{args.name}"
+    result_img_root = f"./results/PuzzleIOI/pred_4views"
 
-    results_path = f"./results/full/PuzzleIOI/results_{args.name}_{args.tag}_{args.split}.npy"
-    results_all_path = f"./results/full/PuzzleIOI/results_{args.name}_{args.tag}_all.npy"
+    results_path = f"./results/PuzzleIOI/results_{args.name}_{args.split}.npy"
+    results_all_path = f"./results/PuzzleIOI/results_{args.name}_all.npy"
 
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     os.environ['OPENBLAS_NUM_THREADS'] = f"{mp.cpu_count()}"
 
     # all_outfits = glob(f"{data_root}/*/outfit*/")
 
-    all_outfits = np.loadtxt(f"clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:,
-                                                                                                  0]
+    all_outfits = np.loadtxt(
+        f"./data/PuzzleIOI/subjects_{args.split}.txt", dtype=str, delimiter=" "
+    )[:, 0]
     all_outfits = [f"./data/{outfit}/" for outfit in all_outfits]
 
     # overwrite the results.npy file
@@ -111,8 +111,7 @@ if __name__ == "__main__":
                         partial(
                             run,
                             evaluator=Evaluation(
-                                data_root, result_geo_root, result_img_root, torch.device("cuda:0"),
-                                args.tag
+                                data_root, result_geo_root, result_img_root, torch.device("cuda:0")
                             ),
                             name=args.name,
                         ),
@@ -134,7 +133,7 @@ if __name__ == "__main__":
         results = np.load(results_all_path, allow_pickle=True).item()
 
     test_subject_outfits = np.loadtxt(
-        f"clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" "
+        f"./data/PuzzleIOI/subjects_{args.split}.txt", dtype=str, delimiter=" "
     )[:, 1:]
 
     total_metrics = {"Chamfer": [], "P2S": [], "Normal": [], "PSNR": [], "SSIM": [], "LPIPS": []}
@@ -152,7 +151,7 @@ if __name__ == "__main__":
         latex_lst.append(np.nanmean(total_metrics[key]))
 
     print(" & ".join([f"{item:.3f}" for item in latex_lst]))
-    print("method", args.name, "set", args.split, "variant", args.tag)
+    print("method", args.name, "set", args.split)
 
     # # plot the histogram
 

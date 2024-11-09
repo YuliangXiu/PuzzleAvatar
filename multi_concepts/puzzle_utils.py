@@ -283,15 +283,15 @@ def read_camera_cali(file, ref_img_file, camera_id):
     return camera_cali
 
 
-cameras = {}
-person_id = "00145"
-cam_cali_file = f"/ps/scratch/ps_shared/yxiu/PuzzleIOI/fitting/{person_id}/outfit5/camera.csd"
+# cameras = {}
+# person_id = "00145"
+# cam_cali_file = f"/ps/scratch/ps_shared/yxiu/PuzzleIOI/fitting/{person_id}/outfit5/camera.csd"
 
-for i in range(1, 23, 1):
+# for i in range(1, 23, 1):
 
-    camera_id = f"{i:02d}_C"
-    ref_img_file = f"/ps/scratch/ps_shared/yxiu/PuzzleIOI/fitting/{person_id}/outfit5/images/{camera_id}.jpg"
-    cameras[camera_id] = read_camera_cali(cam_cali_file, ref_img_file, camera_id)
+#     camera_id = f"{i:02d}_C"
+#     ref_img_file = f"/ps/scratch/ps_shared/yxiu/PuzzleIOI/fitting/{person_id}/outfit5/images/{camera_id}.jpg"
+#     cameras[camera_id] = read_camera_cali(cam_cali_file, ref_img_file, camera_id)
 
 from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
@@ -299,11 +299,10 @@ from torchmetrics.image import StructuralSimilarityIndexMeasure
 
 
 class Evaluation_EASY:
-    def __init__(self, data_root, result_geo_root, result_img_root, device, tag):
+    def __init__(self, data_root, result_geo_root, result_img_root, device):
         self.data_root = data_root
         self.result_geo_root = result_geo_root
         self.result_img_root = result_img_root
-        self.tag = tag
         self.results = {}
 
         self.name = self.result_geo_root.split("/")[-1]
@@ -334,13 +333,13 @@ class Evaluation_EASY:
         # geo path
         self.scan_file = os.path.join(self.data_root, subject, outfit, "scan.obj")
 
-        if self.name == 'puzzle_cam':
+        if self.name == 'puzzle_capture':
             recon_name = f"{subject}_{outfit}_texture"
             self.recon_file = os.path.join(
                 self.result_geo_root, subject, outfit, f"obj/{recon_name}.obj"
             )
             self.pelvis_file = glob(
-                os.path.join(self.data_root.replace("fitting", "puzzle_cam"), subject, outfit) +
+                os.path.join(self.data_root.replace("fitting", "puzzle_capture"), subject, outfit) +
                 "/smplx_*.npy"
             )
         elif self.name == 'tech':
@@ -357,15 +356,13 @@ class Evaluation_EASY:
         self.smplx_file = os.path.join(self.data_root, subject, outfit, "smplx/smplx.obj")
 
         # tex path
-        self.render_gt_dir = os.path.join(self.result_img_root, "fitting", subject, outfit)
-        if self.name == 'puzzle_cam':
-            self.render_recon_dir = os.path.join(
-                self.result_img_root, f"puzzle_cam_{self.tag}", subject, outfit
-            )
+        self.render_gt_dir = os.path.join(
+            self.result_img_root.replace("pred", "gt"), subject, outfit
+        )
+        if self.name == 'puzzle_capture':
+            self.render_recon_dir = os.path.join(self.result_img_root, subject, outfit)
         elif self.name == 'tech':
-            self.render_recon_dir = os.path.join(
-                self.result_img_root, f"tech_{self.tag}", subject, outfit
-            )
+            self.render_recon_dir = os.path.join(self.result_img_root, "tech", subject, outfit)
 
         self.subject = subject
         self.outfit = outfit
@@ -373,7 +370,7 @@ class Evaluation_EASY:
     def load_assets(self):
 
         # geo data
-        if self.name == "puzzle_cam":
+        if self.name == "puzzle_capture":
             self.pelvis_y = np.load(self.pelvis_file[0], allow_pickle=True).item()["pelvis_y"]
         elif self.name == "tech":
             self.pelvis_y = np.load(self.pelvis_file, allow_pickle=True).item()
@@ -422,7 +419,7 @@ class Evaluation_EASY:
             mesh.vertices -= self.scan_center
             mesh.vertices /= 1000.0
         else:
-            if self.name == "puzzle_cam":
+            if self.name == "puzzle_capture":
                 mesh.vertices[:, 1] += self.pelvis_y
             elif self.name == "tech":
                 smpl_scale = self.pelvis_y["scale"].cpu().numpy()
@@ -536,7 +533,7 @@ class PyRenderer:
     def load_assets(self, subject, outfit):
         self.scan_file = os.path.join(self.data_root, subject, outfit, "scan.obj")
         self.pelvis_file = glob(
-            os.path.join(self.data_root.replace("fitting", "puzzle_cam"), subject, outfit) +
+            os.path.join(self.data_root.replace("fitting", "puzzle_capture"), subject, outfit) +
             "/smplx_*.npy"
         )
         self.smplx_path = os.path.join(self.data_root, subject, outfit, "smplx/smplx.obj")

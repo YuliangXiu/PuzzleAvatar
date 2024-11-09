@@ -970,7 +970,7 @@ def parse_args_multi():
                 gpt4v_response[f"{subject}_{outfit}"] = json.load(f)
         else:
             with open(
-                os.path.join(f"./data/PuzzleIOI/puzzle_cam/{subject}/{outfit}", 'gpt4v_simple.json'),
+                os.path.join(f"./data/PuzzleIOI/puzzle_capture/{subject}/{outfit}", 'gpt4v_simple.json'),
                 'r'
             ) as f:
                 gpt4v_response[f"{subject}_{outfit}"] = json.load(f)

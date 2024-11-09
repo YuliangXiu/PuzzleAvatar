@@ -168,9 +168,9 @@ if __name__ == '__main__':
     if cfg.guidance.use_dreambooth:
         if multi_mode:
             if "human" in cfg.exp_root:
-                subjects_lst = np.loadtxt("./clusters/lst/group_char.txt", dtype=str)
+                subjects_lst = np.loadtxt("./data/PuzzleIOI/group_char.txt", dtype=str)
             else:
-                subjects_lst = np.loadtxt("./clusters/lst/group_5.txt", dtype=str)
+                subjects_lst = np.loadtxt("./data/PuzzleIOI/group_5.txt", dtype=str)
             if subjects_lst.shape == ():
                 real_hf_key = subjects_lst.item()
             else:
@@ -227,7 +227,7 @@ if __name__ == '__main__':
         if use_puzzle:
 
             smpl_param_path = os.path.join(
-                "./data", "/".join(opt.exp_dir.split("/")[2:]).replace("puzzle_cam", "fitting"),
+                "./data", "/".join(opt.exp_dir.split("/")[2:]).replace("puzzle_capture", "fitting"),
                 "smplx/smplx.pkl"
             )
             print(f"SMPL pkl path: {smpl_param_path}")

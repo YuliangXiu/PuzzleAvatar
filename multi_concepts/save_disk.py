@@ -10,7 +10,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    subjects = np.loadtxt("./clusters/subjects_test.txt", dtype=str, delimiter=" ")[:, 0]
+    subjects = np.loadtxt("./data/PuzzleIOI/subjects_test.txt", dtype=str, delimiter=" ")[:, 0]
     subjects = [f"./results/{args.tag}/{outfit}/" for outfit in subjects]
 
 

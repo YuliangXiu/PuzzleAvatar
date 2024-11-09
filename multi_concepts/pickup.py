@@ -5,9 +5,9 @@ if __name__ == "__main__":
 
 
     data_root = "./data/PuzzleIOI/fitting"
-    results_path = "./results/full/PuzzleIOI/results_puzzle_cam_full_all.npy"
+    results_path = "./results/full/PuzzleIOI/results_puzzle_capture_full_all.npy"
 
-    all_outfits = np.loadtxt("clusters/lst/subjects_all.txt", dtype=str, delimiter=" ")[:,0]
+    all_outfits = np.loadtxt("data/PuzzleIOI/subjects_all.txt", dtype=str, delimiter=" ")[:,0]
     all_outfits = [f"./data/{outfit}/" for outfit in all_outfits]
 
     results = np.load(results_path, allow_pickle=True).item()

@@ -46,7 +46,7 @@ for person in tqdm(os.listdir(tgt_root)[::-1]):
             else:
                 print(f"{src_obj} or {src_pkl} not exists \n")
 
-# tgt_root = "./data/PuzzleIOI/puzzle_cam"
+# tgt_root = "./data/PuzzleIOI/puzzle_capture"
 # src_root = "./data/PuzzleIOI/puzzle"
 
 # # copy priyanak's fitting results to the fitting folder

@@ -34,7 +34,7 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite, head):
         tex_file = glob(f"{subject}/obj/*albedo.png")[0]
         smpl_file = glob(f"{subject}/obj/*smpl.npy")[0]
     except:
-        with open("./clusters/lst/error_eval_tech.txt", "a") as f:
+        with open("./data/PuzzleIOI/error_eval_tech.txt", "a") as f:
             head = "/".join(subject.split("/")[2:-1])
             f.write(f"{head} {' '.join(head.split('/')[-2:])}\n")
 
@@ -169,8 +169,8 @@ if __name__ == "__main__":
     os.makedirs(current_out_dir, exist_ok=True)
     print(f"Output dir: {current_out_dir}")
 
-    subjects = np.loadtxt("clusters/lst/subjects_all.txt", dtype=str, delimiter=" ")[:, 0]
-    subjects = [f"./results/full/{outfit.replace('puzzle_cam', 'tech')}" for outfit in subjects]
+    subjects = np.loadtxt("data/PuzzleIOI/subjects_all.txt", dtype=str, delimiter=" ")[:, 0]
+    subjects = [f"./results/full/{outfit.replace('puzzle_capture', 'tech')}" for outfit in subjects]
     # subjects = [item for item in subjects if "03619" in item or "03633" in item]
     
     

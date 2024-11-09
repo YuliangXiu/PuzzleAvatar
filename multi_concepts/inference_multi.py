@@ -92,7 +92,7 @@ class BreakASceneInference:
             if "human" == subject:
                 self.instance_dirs.append(f"./data/{subject}/{outfit}")
             else:
-                self.instance_dirs.append(f"./data/PuzzleIOI/puzzle_cam/{subject}/{outfit}")
+                self.instance_dirs.append(f"./data/PuzzleIOI/puzzle_capture/{subject}/{outfit}")
 
         os.makedirs(self.args.output_dir, exist_ok=True)
 

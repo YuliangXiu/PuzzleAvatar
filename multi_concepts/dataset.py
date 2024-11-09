@@ -493,7 +493,7 @@ class MultiDreamBoothDataset(Dataset):
             if subject == 'human':
                 data_dir = Path(f"./data/{subject}/{outfit}")
             else:
-                data_dir = Path(f"./data/PuzzleIOI/puzzle_cam/{subject}/{outfit}")
+                data_dir = Path(f"./data/PuzzleIOI/puzzle_capture/{subject}/{outfit}")
             self.instance_data_roots.append(data_dir)
             if not data_dir.exists():
                 raise ValueError(f"Instance {data_dir} images root doesn't exists.")

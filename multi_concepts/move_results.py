@@ -5,7 +5,7 @@ import os
 
 if __name__ == "__main__":
 
-    all_outfits = np.loadtxt("clusters/subjects_all.txt", dtype=str, delimiter=" ")[:, 0]
+    all_outfits = np.loadtxt("data/PuzzleIOI/subjects_all.txt", dtype=str, delimiter=" ")[:, 0]
 
     out_root = "/is/cluster/fast/yxiu/PuzzleAvatar_data/results/backup"
 

@@ -783,7 +783,7 @@ class Trainer(object):
         # save front image for comparison
         if "PuzzleIOI" in save_path:
             from shutil import copyfile
-            start_idx = save_path.split("/").index("puzzle_cam")
+            start_idx = save_path.split("/").index("puzzle_capture")
             subject, outfit = save_path.split("/")[start_idx+1:start_idx+3]
             src_front_image = os.path.join(
                 "data", "PuzzleIOI", "fitting", subject, outfit, "images", "07_C.jpg"

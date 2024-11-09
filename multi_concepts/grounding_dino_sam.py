@@ -328,7 +328,7 @@ if __name__ == '__main__':
 
     except Exception as e:
         print(e)
-        with open("./clusters/error.txt", "a") as f:
+        with open("./data/PuzzleIOI/error.txt", "a") as f:
             f.write(f"{opt.in_dir[5:]} {' '.join(opt.in_dir.split('/')[-2:])}\n")
         if os.path.exists(f"{opt.in_dir}/{gpt_filename}"):
             os.remove(f"{opt.in_dir}/{gpt_filename}")

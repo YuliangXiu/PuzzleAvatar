@@ -40,7 +40,7 @@ if __name__ == "__main__":
     # loading cfg file
     parser = argparse.ArgumentParser()
     parser.add_argument("-tag", "--tag", type=str, default="full")
-    parser.add_argument("-method", "--method", type=str, default="puzzle_cam")
+    parser.add_argument("-method", "--method", type=str, default="puzzle_capture")
     parser.add_argument("-split", "--split", type=str, default="test")
     parser.add_argument("-overwrite", "--overwrite", action="store_true", help="overwrite existing files")
     args = parser.parse_args()
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     )
 
     subjects_outfits = np.loadtxt(
-        f"./clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" "
+        f"./data/PuzzleIOI/subjects_{args.split}.txt", dtype=str, delimiter=" "
     )[:, 1:]
     subfolders = [
         f"./data/PuzzleIOI_4views/{args.method}_{args.tag}/{subject}/{outfit}"

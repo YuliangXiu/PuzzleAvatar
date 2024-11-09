@@ -22,7 +22,7 @@ numba.config.THREADING_LAYER = 'workqueue'
 sys.path.append(os.path.join(os.getcwd()))
 
 
-def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag, head):
+def render_subject(subject, save_folder, rotation, size, egl, overwrite, head):
 
     initialize_GL_context(width=size, height=size, egl=egl)
 
@@ -33,7 +33,7 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag, he
         mesh_file = glob(f"{subject}/obj/*texture.obj")[0]
         tex_file = glob(f"{subject}/obj/*albedo.png")[0]
     except:
-        with open("./clusters/lst/error_eval.txt", "a") as f:
+        with open("./data/PuzzleIOI/error_rendering.txt", "a") as f:
             head = "/".join(subject.split("/")[2:-1])
             f.write(f"{head} {' '.join(head.split('/')[-2:])}\n")
 
@@ -41,7 +41,7 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag, he
 
     [person, outfit] = os.path.basename(mesh_file).split("_")[:2]
     scan_file = f"./data/PuzzleIOI/fitting/{person}/{outfit}/scan.obj"
-    pelvis_file = glob(f"./data/PuzzleIOI/puzzle_cam/{person}/{outfit}/smplx_*.npy")[0]
+    pelvis_file = glob(f"./data/PuzzleIOI/puzzle_capture/{person}/{outfit}/smplx_*.npy")[0]
     pelvis_y = np.load(pelvis_file, allow_pickle=True).item()["pelvis_y"]
 
     vertices, faces, normals, faces_normals, textures, face_textures = load_scan(
@@ -106,13 +106,11 @@ def render_subject(subject, save_folder, rotation, size, egl, overwrite, tag, he
         idx = subject.split("/").index("PuzzleIOI")
 
         rgb_path = os.path.join(
-            save_folder,
-            "/".join(subject.split("/")[idx + 1:]).replace("puzzle_cam", f"puzzle_cam_{tag}"),
+            save_folder, "/".join(subject.split("/")[idx + 2:]),
             'render_head' if head else 'render', f'{y:03d}.png'
         )
         norm_path = os.path.join(
-            save_folder,
-            "/".join(subject.split("/")[idx + 1:]).replace("puzzle_cam", f"puzzle_cam_{tag}"),
+            save_folder, "/".join(subject.split("/")[idx + 2:]),
             'normal_head' if head else 'normal', f'{y:03d}.png'
         )
 
@@ -134,7 +132,6 @@ if __name__ == "__main__":
     parser.add_argument(
         '-debug', '--debug', action="store_true", help='debug mode, only render one subject'
     )
-    parser.add_argument('-tag', '--tag', type=str, help='tag name')
     parser.add_argument(
         '-headless', '--headless', action="store_true", help='headless rendering with EGL'
     )
@@ -167,12 +164,13 @@ if __name__ == "__main__":
         f"Start Rendering {args.dataset} with {args.num_views} views, {args.size}x{args.size} size."
     )
 
-    current_out_dir = f"{args.out_dir}/{args.dataset}_{args.num_views}views"
+    current_out_dir = f"{args.out_dir}/PuzzleIOI/pred_{args.num_views}views"
     os.makedirs(current_out_dir, exist_ok=True)
     print(f"Output dir: {current_out_dir}")
 
-    subjects = np.loadtxt(f"clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:, 0]
-    subjects = [f"./results/{args.tag}/{outfit}/" for outfit in subjects]
+    subjects = np.loadtxt(f"data/PuzzleIOI/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:,
+                                                                                                 0]
+    subjects = [f"{args.out_dir}/{outfit}/" for outfit in subjects]
     # subjects = [item for item in subjects if "03619" in item or "03633" in item]
 
     if args.debug:
@@ -190,7 +188,6 @@ if __name__ == "__main__":
                     size=args.size,
                     egl=args.headless,
                     overwrite=args.overwrite,
-                    tag=args.tag,
                     head=args.head,
                 ),
                 subjects,

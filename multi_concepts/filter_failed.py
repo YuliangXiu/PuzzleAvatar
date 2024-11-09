@@ -12,7 +12,7 @@ if __name__ == "__main__":
     parser.add_argument('-split', '--split', type=str, default="test", help='split name')
     args = parser.parse_args()
 
-    subjects = np.loadtxt(f"./clusters/lst/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:,
+    subjects = np.loadtxt(f"./data/PuzzleIOI/subjects_{args.split}.txt", dtype=str, delimiter=" ")[:,
                                                                                                  0]
     subjects = [f"./results/{args.tag}/{outfit}/" for outfit in subjects]
 
@@ -83,8 +83,8 @@ if __name__ == "__main__":
     print("Failed SDS: ", len(failed_sds))
 
     if 'mvdream' in args.tag:
-        lst_to_file(failed_sd, f"../PuzzleMV/clusters/failed_sd_{args.tag}.txt")
-        lst_to_file(failed_sds, f"../PuzzleMV/clusters/failed_sds_{args.tag}.txt")
+        lst_to_file(failed_sd, f"../PuzzleMV/data/PuzzleIOI/failed_sd_{args.tag}.txt")
+        lst_to_file(failed_sds, f"../PuzzleMV/data/PuzzleIOI/failed_sds_{args.tag}.txt")
     else:
-        lst_to_file(failed_sd, f"./clusters/lst/failed_sd_{args.tag}.txt")
-        lst_to_file(failed_sds, f"./clusters/lst/failed_sds_{args.tag}.txt")
+        lst_to_file(failed_sd, f"./data/PuzzleIOI/failed_sd_{args.tag}.txt")
+        lst_to_file(failed_sds, f"./data/PuzzleIOI/failed_sds_{args.tag}.txt")
