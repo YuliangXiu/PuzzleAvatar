@@ -47,15 +47,16 @@ accelerate launch multi_concepts/train.py \
   --use_view_prompt \
   --do_not_apply_masked_prior \
   --mixed_precision fp16 \
-  --gradient_checkpointing \
   --use_8bit_adam \
-  # --set_grads_to_none \
+  --set_grads_to_none \ 
+  # --gradient_checkpointing \ 
   # --use_shape_description \
   # --no_prior_preservation \
 
+# There may be some bugs, if there are any training problems please do not open these option, ref to: https://github.com/YuliangXiu/PuzzleAvatar/issues/10
 # Reduce VRAM to 8~16GB, refer to: https://github.com/YuliangXiu/PuzzleAvatar/issues/3
 # --mixed_precision fp16 \
-# --gradient_checkpointing \
+# --gradient_checkpointing \ 
 # --use_8bit_adam \
 # --set_grads_to_none \
 
