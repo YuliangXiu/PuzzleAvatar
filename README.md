@@ -88,6 +88,9 @@ bash scripts/fetch_data.sh
 3. For evaluation / benchmark
 ```bash
 # render the reconstruction results (4 views)
+# If the rendering process is stuck, please refer to the changes for PRT computation:
+# https://github.com/YuliangXiu/ICON/pull/237/files
+
 python -m render.render_batch_result -headless -out_dir ./results/ -split test
 
 # calculate both 3D metrics (Chamfer, P2S, NC) and 2D metrics (PSNR, SSIM, LPIPS)
