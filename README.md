@@ -75,6 +75,51 @@ The results will be saved in the experiment folder `results/human/yuliang`, and 
     <img src="assets/optim.gif" width="80%"/>
 </div>
 
+## Training Stages and Checkpoints
+
+PuzzleAvatar training consists of multiple stages:
+
+1. **Stage 1: Multi-concept DreamBooth Training** (Step 1 in `run.sh`)
+   - Fine-tunes Stable Diffusion on your images
+   - Default training: 1000 steps (phase1) + 4000 steps (phase2)
+   - Checkpoints saved every 1000 steps starting after phase 1 completes
+   - Checkpoint locations depend on `peft_type` setting:
+     - **With PEFT** (`peft_type="lora"` or `"boft"`): Saved in `{EXP_DIR}/unet/{step}/` and `{EXP_DIR}/text_encoder/{step}/`
+     - **Without PEFT** (`peft_type="none"`, default): Full pipeline saved directly to `{EXP_DIR}`
+
+2. **Stage 2: Inference** (Step 2 in `run.sh`)
+   - Generates synthetic views using trained model
+   - Output saved in `{EXP_DIR}/output/`
+
+3. **Stage 3: Geometry Optimization** (Step 3 in `run.sh`)
+   - Optimizes 3D geometry
+   - Results in `{EXP_DIR}/geometry/`
+
+4. **Stage 4: Texture Optimization** (Step 4 in `run.sh`)
+   - Optimizes texture
+   - Results in `{EXP_DIR}/texture/`
+
+### Using Pre-trained Models
+
+If you have trained a model and want to share the first-stage results:
+
+```bash
+# The first stage checkpoints are located at:
+# - With PEFT: {EXP_DIR}/unet/{step}/ and {EXP_DIR}/text_encoder/{step}/
+# - Without PEFT (default): {EXP_DIR}/ (contains unet/, text_encoder/, etc.)
+
+# To use these checkpoints for inference (Step 2):
+python multi_concepts/inference.py \
+  --pretrained_model_name_or_path stabilityai/stable-diffusion-2-1-base \
+  --model_dir {EXP_DIR} \
+  --instance_dir {INPUT_DIR} \
+  --num_samples 10 \
+  --use_peft none \
+  --use_shape_description
+```
+
+**Note:** Due to licensing and file size constraints, we do not provide pre-trained first-stage checkpoints. Users need to train their own models using their image collections. The training takes approximately 1-2 hours on a single GPU for the first stage.
+
 ## Dataset and Benchmark
 
 <div align="center">
